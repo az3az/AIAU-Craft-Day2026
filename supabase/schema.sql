@@ -121,6 +121,8 @@ create index if not exists route_stops_destination_id_idx
 -- ---------------------------------------------------------------------------
 -- Google Sheets / Apps Script から読む用のビュー
 --   ルート結果シートの列順にそのまま並べている
+--   status = 'completed' のものだけを対象にし、作成中 (draft) は出さない。
+--   created_at が同じ秒になっても結果がぶれないよう id を tie-breaker にする。
 -- ---------------------------------------------------------------------------
 create or replace view public.latest_route_stops as
 select
@@ -137,29 +139,38 @@ select
 from public.route_stops s
 join public.route_runs r on r.id = s.route_run_id
 where r.id = (
-  select id from public.route_runs order by created_at desc limit 1
+  select id
+  from public.route_runs
+  where status in ('completed', 'exported')
+  order by created_at desc, id desc
+  limit 1
 )
 order by s.stop_no;
 
 -- ---------------------------------------------------------------------------
--- RLS
---   取込みスクリプトと Apps Script は service_role キーを使う想定。
---   service_role は RLS をバイパスするため、既定では anon / authenticated に
---   何も許可しない (= 表に出さない) 状態にしておく。
---   社内メンバーに読み取りを開放する場合は下のポリシーのコメントを外す。
+-- RLS / 権限
+--   方針:
+--     * service_role キーはローカルの管理スクリプト (src/*.py) 専用。
+--       Apps Script には置かない。
+--     * Apps Script は anon キーで latest_route_stops ビューだけを読む。
+--     * テーブル本体は anon / authenticated からは一切読めないままにする。
 -- ---------------------------------------------------------------------------
 alter table public.delivery_destinations enable row level security;
 alter table public.route_runs enable row level security;
 alter table public.route_stops enable row level security;
 
--- drop policy if exists "authenticated can read destinations" on public.delivery_destinations;
--- create policy "authenticated can read destinations"
---   on public.delivery_destinations for select to authenticated using (true);
---
--- drop policy if exists "authenticated can read route runs" on public.route_runs;
--- create policy "authenticated can read route runs"
---   on public.route_runs for select to authenticated using (true);
---
--- drop policy if exists "authenticated can read route stops" on public.route_stops;
--- create policy "authenticated can read route stops"
---   on public.route_stops for select to authenticated using (true);
+-- テーブルには anon / authenticated 向けのポリシーを作らない (= 全拒否)。
+-- 既定の GRANT も外して、RLS と権限の両方で閉じておく。
+revoke all on public.delivery_destinations from anon, authenticated;
+revoke all on public.route_runs from anon, authenticated;
+revoke all on public.route_stops from anon, authenticated;
+
+-- Apps Script (anon キー) に公開するのはこのビューだけ。
+-- ビューは security_invoker を付けずに作るので、ビュー所有者の権限で
+-- 実行され、下のテーブルの RLS を通らずに直近のルートだけを返せる。
+-- (PostgreSQL 15+ で security_invoker = true にした場合は、別途 route_runs /
+--  route_stops に anon 向け SELECT ポリシーが必要になるので注意)
+grant select on public.latest_route_stops to anon, authenticated;
+
+-- anon キーも外に出したくない場合は、この grant をやめて
+-- Edge Function (service_role をサーバ側に閉じ込める) 経由にする。README参照。

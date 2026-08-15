@@ -16,6 +16,7 @@
 
 import argparse
 import json
+from urllib.parse import quote
 
 from route_optimizer import START_POINT, load_destinations, optimize_route
 from supabase_client import SupabaseClient
@@ -57,14 +58,24 @@ def fetch_destinations(client):
     ]
 
 
+def quote_in_value(value):
+    """PostgRESTの in.(...) に入れる1つ分を安全な形にする。
+
+    カンマやダブルクオートを含むidでも壊れないよう、ダブルクオートで囲って
+    中の \\ と " をエスケープし、その上でURLエンコードする。
+    """
+    escaped = value.replace("\\", "\\\\").replace('"', '\\"')
+    return quote(f'"{escaped}"', safe="")
+
+
 def destination_id_map(client, external_ids):
     if not external_ids:
         return {}
 
-    quoted = ",".join(f'"{external_id}"' for external_id in sorted(set(external_ids)))
+    values = ",".join(quote_in_value(external_id) for external_id in sorted(set(external_ids)))
     rows = client.select(
         DESTINATIONS_TABLE,
-        query=f"select=id,external_id&external_id=in.({quoted})",
+        query=f"select=id,external_id&external_id=in.({values})",
     )
     return {row["external_id"]: row["id"] for row in rows}
 
