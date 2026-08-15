@@ -114,7 +114,7 @@ SHEET_NAME_PATTERN = re.compile(r"^(\d{1,2})(\d{1,2})$")
 # 「10:00 ～ 19:00」のような作業可能帯と、「(11:30)」のような指定時刻。
 TIME_RANGE_PATTERN = re.compile(r"(\d{1,2}:\d{2})\s*[～~〜-]\s*(\d{1,2}:\d{2})")
 APPOINTMENT_PATTERN = re.compile(r"[(（](\d{1,2}:\d{2})[)）]")
-# 「B26004219(市ヶ谷CC)」のような伝票番号＋場所。
+# 「A12345678(◯◯会場)」のような伝票番号＋場所。
 ORDER_CODE_VENUE_PATTERN = re.compile(r"^([A-Za-z]?\d{4,})[(（](.+)[)）]$")
 
 
@@ -166,7 +166,7 @@ def sheet_date(worksheet, sheet_name, year, month):
 
 
 def split_customer_venue(text):
-    """「【設】ﾚｽﾀｰ村上様＠東京ﾋﾞｯｸﾞｻｲﾄ南1-2」→ (ﾚｽﾀｰ村上様, 東京ﾋﾞｯｸﾞｻｲﾄ南1-2)"""
+    """「【設】◯◯様＠△△会場南1-2」→ (◯◯様, △△会場南1-2)"""
     body = TAG_PATTERN.sub("", text).strip()
     body = re.sub(r"^\[[^\]]*\]", "", body).strip()
 
@@ -213,7 +213,7 @@ def has_customer_marker(text):
 
 
 def is_placeholder(customer, venue):
-    """【納】＠B2600() のような凡例行をタスクとして拾わない。"""
+    """【納】＠A1234() のような凡例行をタスクとして拾わない。"""
     return not customer and (not venue or "()" in venue)
 
 

@@ -85,7 +85,7 @@ required_vehicle,required_staff_count,assigned_vehicle,assigned_staff,origin,not
 | `4t` / `2t` / `1BOX` / `ﾊｲﾙｰﾌ` | `required_vehicle` |
 | `設営撤去12名` / `設営撤去+9名` | `required_staff_count` |
 | `10:00 ～ 19:00` / `(11:30)` | `start_time` (指定時刻を優先) / `end_time` |
-| `B26004219(市ヶ谷CC)` | `venue_name=市ヶ谷CC`、伝票番号は `notes` |
+| `A12345678(◯◯会場)` | `venue_name=◯◯会場`、伝票番号は `notes` |
 
 判定できなかった記述は捨てずに `notes` に残します。`address` は空で出るので、
 住所と緯度経度は人が補ってから `data/*.csv` (`id,name,address,lat,lng,...`) に整形し、
