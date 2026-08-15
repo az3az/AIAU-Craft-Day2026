@@ -56,8 +56,10 @@ fly launch --no-deploy
 # デプロイ
 fly deploy
 
-# 実行（バッチなので都度マシンを起動して流す）
-fly machine run . --command "python3 src/route_optimizer.py"
+# 実行（バッチなので都度マシンを起動して流す。イメージ参照を指定する）
+fly machine run registry.fly.io/aiau-craft-day2026:latest \
+  --command "python3 src/route_optimizer.py" \
+  --rm -a aiau-craft-day2026
 
 # ログ確認
 fly logs
