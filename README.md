@@ -13,11 +13,14 @@
 
 ```text
 data/
-  sample_delivery_destinations.csv   仮の配送先リスト
+  sample_delivery_destinations.csv   仮の配送先リスト (緯度経度あり)
+  sample_addresses.csv               住所だけのリスト (ジオコーディング用)
 output/
   optimized_route.csv                作成された配送順
 src/
   route_optimizer.py                 ローカル確認用
+  geocoder.py                        住所 → 緯度経度 (キャッシュ付き)
+  geocode_destinations.py            住所CSV → 配送先CSV
   supabase_client.py                 Supabase REST APIへの最小クライアント
   import_destinations.py             配送先CSVをSupabaseに取り込む
   save_route_to_supabase.py          ルート結果をSupabaseに保存する
@@ -31,22 +34,70 @@ docs/
 
 ## データの前提
 
-今回の仮データは、住所だけではなく緯度・経度も入れています。
-住所だけから正確な距離を出すにはGoogle Maps APIなどが必要になるため、まずはハッカソンで動く形を優先します。
-
 SalesforceからCSVを書き出すときも、最終的には以下の列に寄せる想定です。
 
 ```text
 id,name,address,lat,lng,time_window_start,time_window_end,service_minutes,priority
 ```
 
+`lat` / `lng` が無い住所だけのCSVは、後述のジオコーディングでこの形に変換できます。
+
 ## ローカルで試す
 
 ```bash
 python3 src/route_optimizer.py
+
+# 別のCSV・別の起点で試す
+python3 src/route_optimizer.py --input data/geocoded_destinations.csv --origin tokyo_station
 ```
 
 実行すると、`output/optimized_route.csv` が作成されます。
+
+## 住所だけのCSVからルートを作る (ジオコーディング)
+
+`address` 列だけあるランダムな住所CSVを、緯度経度付きの配送先CSVに変換します。
+`id` / `name` / `priority` / 時間帯の列は無ければ自動補完されます (`D001`、住所、`3`、9:00-18:00)。
+
+```bash
+# Google Geocoding API を使う (推奨)
+export GOOGLE_MAPS_API_KEY=...   # .env / Fly secrets のみ。コードやCSVには書かない
+python3 src/geocode_destinations.py \
+  --input data/sample_addresses.csv \
+  --output data/geocoded_destinations.csv
+
+# キー無しで試す (OpenStreetMap Nominatim。デモ用、1秒1リクエストに制限)
+python3 src/geocode_destinations.py --provider nominatim --dry-run
+```
+
+- 結果は `data/geocode_cache.json` にキャッシュされ、同じ住所は2回目以降APIを呼びません（見つからなかった住所も記録します）。キャッシュと変換結果は顧客情報を含むため `.gitignore` 対象です。
+- `東京都港区海岸1-7-1` のような街区番号で当たらない場合は `東京都港区海岸1丁目` まで粒度を落として再検索します。それでも見つからない行は `[skip]` として出力から外します。
+
+変換後はCSVは既存の形なので、そのまま取込み・保存に使えます。
+
+```bash
+python3 src/import_destinations.py --input data/geocoded_destinations.csv
+python3 src/save_route_to_supabase.py --source supabase --label デモ便
+
+# 住所だけのCSVを直接渡すこともできる (足りない座標だけその場でジオコーディングする)
+python3 src/save_route_to_supabase.py --source csv --input data/sample_addresses.csv --dry-run
+```
+
+### 起点の指定
+
+`--origin` (または環境変数 `ROUTE_ORIGIN`) でルートの起点を切り替えます。`src/route_optimizer.py` と `src/save_route_to_supabase.py` の両方で使えます。
+
+| 指定 | 動作 |
+| --- | --- |
+| `tokyo_station` (既定) | 東京駅 (35.681236, 139.767125) を固定で使う |
+| `center` | `ROUTE_ORIGIN_LAT` / `ROUTE_ORIGIN_LNG`、無ければ `ROUTE_ORIGIN_ADDRESS` をジオコーディングして使う (表示名は `ROUTE_ORIGIN_NAME`) |
+| 任意の住所 | その住所をジオコーディングして起点にする |
+
+```bash
+ROUTE_ORIGIN_ADDRESS="東京都江東区新木場1丁目" \
+  python3 src/save_route_to_supabase.py --source csv --origin center --dry-run
+```
+
+起点は `route_runs.start_name` / `start_address` / `start_lat` / `start_lng` にそのまま保存されるので、Google Sheets 側の表示経路は変えずに使えます。
 
 ## Fly.ioでのデプロイ手順
 
@@ -62,7 +113,8 @@ fly apps create aiau-craft-day2026
 # Supabaseの接続情報をシークレットとして登録（実行時に環境変数として渡される）
 fly secrets set -a aiau-craft-day2026 \
   SUPABASE_URL="https://xxxxxxxx.supabase.co" \
-  SUPABASE_SERVICE_ROLE_KEY="..."
+  SUPABASE_SERVICE_ROLE_KEY="..." \
+  GOOGLE_MAPS_API_KEY="..."   # ジオコーディングをFly上でも使う場合のみ
 
 # イメージをビルドしてFlyのレジストリにpush（マシンは作らない）
 fly deploy --build-only --push -a aiau-craft-day2026
@@ -145,7 +197,7 @@ GRANT も外しています。外に公開するのは `latest_route_stops` ビ�
 ### 依存パッケージ
 
 Supabaseに接続するスクリプト (`src/import_destinations.py` / `src/save_route_to_supabase.py`) は
-certifi を使います。`src/route_optimizer.py` だけを動かす場合は不要です。
+certifi を使います (ジオコーディングも同じ SSLContext を使うため必要です)。
 
 ```bash
 pip install -r requirements.txt
@@ -159,10 +211,15 @@ certifi のCA束から作った `SSLContext` を使っています。
 ```bash
 export SUPABASE_URL="https://xxxxxxxx.supabase.co"
 export SUPABASE_SERVICE_ROLE_KEY="..."
+
+# ジオコーディングを使う場合
+export GOOGLE_MAPS_API_KEY="..."
+export GEOCODER="google"          # google | nominatim (既定: キーがあれば google)
 ```
 
 service_role キーは RLS をバイパスするため、リポジトリにはコミットせず `.env` などに置いてください
 (`.gitignore` に `.env` が入っています)。
+`GOOGLE_MAPS_API_KEY` も同じく `.env` / `fly secrets` のみで扱い、Apps Script には置きません。
 
 ### 配送先CSVの取込み
 

@@ -19,7 +19,8 @@ import json
 import os
 from urllib.parse import quote
 
-from route_optimizer import START_POINT, load_destinations, optimize_route
+from geocode_destinations import ensure_coordinates
+from route_optimizer import load_destinations, optimize_route, resolve_start_point
 from supabase_client import SupabaseClient, SupabaseError
 
 DESTINATIONS_TABLE = "delivery_destinations"
@@ -81,14 +82,14 @@ def destination_id_map(client, external_ids):
     return {row["external_id"]: row["id"] for row in rows}
 
 
-def build_run(route, label, delivery_date):
+def build_run(route, label, delivery_date, start_point):
     return {
         "run_label": label,
         "delivery_date": delivery_date,
-        "start_name": START_POINT["name"],
-        "start_address": START_POINT["address"],
-        "start_lat": float(START_POINT["lat"]),
-        "start_lng": float(START_POINT["lng"]),
+        "start_name": start_point["name"],
+        "start_address": start_point["address"],
+        "start_lat": float(start_point["lat"]),
+        "start_lng": float(start_point["lng"]),
         "algorithm": ALGORITHM,
         "total_distance_km": route[-1]["total_distance_km"] if route else 0,
         "stop_count": len(route),
@@ -134,6 +135,16 @@ def main():
         help="配送日 (YYYY-MM-DD。環境変数 DELIVERY_DATE でも指定可)",
     )
     parser.add_argument(
+        "--origin",
+        default=os.environ.get("ROUTE_ORIGIN"),
+        help="起点。tokyo_station / center / 住所そのもの (環境変数 ROUTE_ORIGIN でも指定可)",
+    )
+    parser.add_argument(
+        "--input",
+        default=os.environ.get("ROUTE_INPUT_CSV"),
+        help="--source csv のときに読むCSV (既定: data/sample_delivery_destinations.csv)",
+    )
+    parser.add_argument(
         "--dry-run",
         action="store_true",
         help="Supabaseに保存せず、保存予定の内容を表示する",
@@ -142,8 +153,11 @@ def main():
 
     client = None if (args.dry_run and args.source == "csv") else SupabaseClient()
 
+    start_point = resolve_start_point(args.origin)
+
     if args.source == "csv":
-        destinations = load_destinations()
+        # lat/lng の無い住所CSVでも、その場でジオコーディングして続行する。
+        destinations = ensure_coordinates(load_destinations(args.input))
     else:
         destinations = fetch_destinations(client)
         if not destinations:
@@ -152,8 +166,8 @@ def main():
                 " 先に src/import_destinations.py を実行してください。"
             )
 
-    route = optimize_route(destinations)
-    run = build_run(route, args.label, args.delivery_date)
+    route = optimize_route(destinations, start_point)
+    run = build_run(route, args.label, args.delivery_date, start_point)
 
     if args.dry_run:
         preview = {"route_run": run, "route_stops": build_stops(route, None, {})}
