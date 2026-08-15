@@ -65,9 +65,20 @@ python3 src/geocode_destinations.py \
   --input data/sample_addresses.csv \
   --output data/geocoded_destinations.csv
 
-# キー無しで試す (OpenStreetMap Nominatim。デモ用、1秒1リクエストに制限)
+# キー無しで動作を見る (OpenStreetMap Nominatim。開発確認専用、1秒1リクエストに制限)
 python3 src/geocode_destinations.py --provider nominatim --dry-run
 ```
+
+### プロバイダの使い分け (重要)
+
+| 用途 | プロバイダ |
+| --- | --- |
+| デモ本番・実運用 | **Google Geocoding API (`GEOCODER=google`) を前提とする** |
+| 手元での開発確認 | Nominatim (`--provider nominatim`)。キー不要だが結果の精度は保証しない |
+
+Nominatim は存在しない住所文字列 (例: 「あああああ」) を別の地点にマッチさせて
+もっともらしい座標を返すことがあるため、誤った配送先がルートに入る。
+デモ本番や実運用では必ず `GOOGLE_MAPS_API_KEY` を設定して Google を使うこと。
 
 - 結果は `data/geocode_cache.json` にキャッシュされ、同じ住所は2回目以降APIを呼びません（見つからなかった住所も記録します）。キャッシュと変換結果は顧客情報を含むため `.gitignore` 対象です。
 - `東京都港区海岸1-7-1` のような街区番号で当たらない場合は `東京都港区海岸1丁目` まで粒度を落として再検索します。それでも見つからない行は `[skip]` として出力から外します。
@@ -214,7 +225,7 @@ export SUPABASE_SERVICE_ROLE_KEY="..."
 
 # ジオコーディングを使う場合
 export GOOGLE_MAPS_API_KEY="..."
-export GEOCODER="google"          # google | nominatim (既定: キーがあれば google)
+export GEOCODER="google"          # デモ本番は google 固定。nominatim は開発確認用
 ```
 
 service_role キーは RLS をバイパスするため、リポジトリにはコミットせず `.env` などに置いてください

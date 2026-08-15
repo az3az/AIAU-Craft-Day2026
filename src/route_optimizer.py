@@ -80,8 +80,24 @@ def distance_km(a, b):
 
 
 def load_destinations(input_file=None):
-    with Path(input_file or INPUT_FILE).open(newline="", encoding="utf-8") as file:
-        return list(csv.DictReader(file))
+    path = Path(input_file or INPUT_FILE)
+
+    try:
+        with path.open(newline="", encoding="utf-8") as file:
+            return list(csv.DictReader(file))
+    except FileNotFoundError as error:
+        raise SystemExit(
+            f"配送先CSVが見つかりません: {path} (--input のパスを確認してください)"
+        ) from error
+    except IsADirectoryError as error:
+        raise SystemExit(
+            f"{path} はディレクトリです。CSVファイルを指定してください。"
+        ) from error
+    except UnicodeDecodeError as error:
+        raise SystemExit(
+            f"{path} を utf-8 で読めませんでした。"
+            " Excel由来のCSVなら src/geocode_destinations.py --encoding cp932 で変換してください。"
+        ) from error
 
 
 def optimize_route(destinations, start_point=None):

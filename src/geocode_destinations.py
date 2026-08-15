@@ -62,6 +62,13 @@ def read_rows(path, encoding):
                 {(key or "").strip(): cell_text(value) for key, value in row.items()}
                 for row in reader
             ]
+    except FileNotFoundError as error:
+        raise SystemExit(
+            f"入力CSVが見つかりません: {path}"
+            " (--input のパスを確認してください)"
+        ) from error
+    except IsADirectoryError as error:
+        raise SystemExit(f"{path} はディレクトリです。CSVファイルを指定してください。") from error
     except UnicodeDecodeError as error:
         raise SystemExit(
             f"{path} を {encoding} で読めませんでした。"
