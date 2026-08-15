@@ -16,10 +16,11 @@
 
 import argparse
 import json
+import os
 from urllib.parse import quote
 
 from route_optimizer import START_POINT, load_destinations, optimize_route
-from supabase_client import SupabaseClient
+from supabase_client import SupabaseClient, SupabaseError
 
 DESTINATIONS_TABLE = "delivery_destinations"
 RUNS_TABLE = "route_runs"
@@ -119,11 +120,19 @@ def main():
     parser.add_argument(
         "--source",
         choices=["csv", "supabase"],
-        default="supabase",
-        help="配送先の取得元",
+        default=os.environ.get("ROUTE_SOURCE", "supabase"),
+        help="配送先の取得元 (環境変数 ROUTE_SOURCE でも指定可)",
     )
-    parser.add_argument("--label", default=None, help="実行の名前 (例: 2026-02-01_午前便)")
-    parser.add_argument("--delivery-date", default=None, help="配送日 (YYYY-MM-DD)")
+    parser.add_argument(
+        "--label",
+        default=os.environ.get("ROUTE_RUN_LABEL"),
+        help="実行の名前 (例: 2026-02-01_午前便。環境変数 ROUTE_RUN_LABEL でも指定可)",
+    )
+    parser.add_argument(
+        "--delivery-date",
+        default=os.environ.get("DELIVERY_DATE"),
+        help="配送日 (YYYY-MM-DD。環境変数 DELIVERY_DATE でも指定可)",
+    )
     parser.add_argument(
         "--dry-run",
         action="store_true",
@@ -165,4 +174,7 @@ def main():
 
 
 if __name__ == "__main__":
-    main()
+    try:
+        main()
+    except SupabaseError as error:
+        raise SystemExit(str(error)) from error
