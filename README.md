@@ -140,8 +140,52 @@ python3 src/save_route_to_supabase.py --source csv --dry-run
 3. `data/sample_delivery_destinations.csv` の中身を貼り付ける
 4. Google Sheetsのメニューから `拡張機能 > Apps Script` を開く
 5. `apps-script/Code.gs` の中身を貼り付ける
-6. `optimizeRoute` を実行する
+6. `optimizeRoute` を実行する (シートの `配送ルート` メニューからでも可)
 7. `ルート結果` シートに配送順が出力される
+
+## Google SheetsでSupabaseの結果を見る (段階2)
+
+ルート計算は手元で済ませ、Apps Script は `latest_route_stops` を読むだけにします。
+使う関数は `importRouteFromSupabase` で、書き出し先は段階1と同じ `ルート結果` シート・同じ列順です。
+
+### 1. Supabase側を準備する
+
+```bash
+python3 src/import_destinations.py
+python3 src/save_route_to_supabase.py --source supabase --label 2026-02-01_午前便
+```
+
+### 2. anonキーを控える
+
+Supabaseダッシュボードの `Project Settings > API` から、`Project URL` と
+`anon public` キーをコピーします。**service_role キーは使いません。**
+
+### 3. スクリプトプロパティを設定する
+
+1. Google Sheetsの `拡張機能 > Apps Script` を開く
+2. `apps-script/Code.gs` の中身を貼り付けて保存する
+3. 左のメニューで `プロジェクトの設定` (歯車アイコン) を開く
+4. `スクリプト プロパティ` で `スクリプト プロパティを追加` を押し、以下の2つを登録する
+
+| プロパティ名 | 値 |
+| --- | --- |
+| `SUPABASE_URL` | `https://xxxxxxxx.supabase.co` |
+| `SUPABASE_ANON_KEY` | anon public キー |
+
+キーを `Code.gs` に直書きしないでください。コードはリポジトリに戻すことがあります。
+
+### 4. 実行する
+
+`importRouteFromSupabase` を実行するか、シートを開き直して `配送ルート > Supabaseから取得 (段階2)`
+を選びます。初回は UrlFetchApp の権限承認が出ます。
+
+よくあるエラー:
+
+| メッセージ | 原因 |
+| --- | --- |
+| スクリプトプロパティに ... を設定してください | 上の2つが未登録 |
+| 読み取りに失敗しました (401/404) | anonキーが違う、またはビューへの `grant select ... to anon` 未実行 |
+| 完了済みのルートがありません | `route_runs` に `status = 'completed'` の行がない |
 
 ## Google Sheets出力との接続方針
 
@@ -172,24 +216,13 @@ Salesforce CSV → src/import_destinations.py → delivery_destinations
 ```
 
 ルート計算は手元のスクリプト (service_role) 側で行い、Apps Script は表示だけの担当になります。
-
-**必要な作業**: 段階1の `Code.gs` はシート内で計算する実装なので、Supabaseを読む関数
-(例: `importRouteFromSupabase`) を `apps-script/Code.gs` に追加する必要があります。未実装です。
+使うのは `apps-script/Code.gs` の `importRouteFromSupabase` で、手順は上の
+「Google SheetsでSupabaseの結果を見る (段階2)」を参照してください。
+段階1の `optimizeRoute` はそのまま残してあり、どちらも同じ `ルート結果` シートに書きます。
 
 読み取りには **anon キー** を使い、`supabase/schema.sql` で `latest_route_stops` ビューにだけ
 `grant select ... to anon` しています。テーブル本体は RLS と GRANT の両方で閉じているので、
 anon キーが漏れても見えるのは「直近の完了済みルート」だけです。
-
-```javascript
-// apps-script/Code.gs に追加する想定 (キーは スクリプトプロパティ に入れる)
-const props = PropertiesService.getScriptProperties();
-const anonKey = props.getProperty('SUPABASE_ANON_KEY');  // service_role は置かない
-const response = UrlFetchApp.fetch(
-  props.getProperty('SUPABASE_URL') + '/rest/v1/latest_route_stops?select=*&order=stop_no.asc',
-  { headers: { apikey: anonKey, Authorization: 'Bearer ' + anonKey } }
-);
-const stops = JSON.parse(response.getContentText());
-```
 
 anon キーも外に出したくない場合は、Supabase Edge Function を間に入れ、
 service_role をサーバ側に閉じ込めます。
@@ -213,7 +246,7 @@ Apps Script → Edge Function (共有シークレットで認証 / service_role�
 - service_role キーは手元の管理スクリプト専用。Apps Script には置かない
 - Apps Script からは anon キーで `latest_route_stops` だけを読む。
   さらに閉じたい場合は Edge Function 経由にする
-- キーはコードに直書きせず、必ず スクリプトプロパティ に入れる
+- キーはコードに直書きせず、必ず スクリプトプロパティ (`SUPABASE_URL` / `SUPABASE_ANON_KEY`) に入れる
 - Supabaseに保存される `route_runs.status` は `completed` になって初めてビューに出る。
   作成中のものをシートに見せたくなければ `draft` で入れる
 - 個人情報 (電話番号など) の列を増やす場合は、ビューに出す列を絞る
