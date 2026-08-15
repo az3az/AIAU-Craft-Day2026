@@ -74,7 +74,13 @@ class GeocodeCache:
         self.misses = 0
         if self.path.exists():
             with self.path.open(encoding="utf-8") as file:
-                self.entries = json.load(file)
+                try:
+                    self.entries = json.load(file)
+                except json.JSONDecodeError as error:
+                    raise GeocodeError(
+                        f"キャッシュファイルを読めません: {self.path} ({error})。"
+                        " 削除するか --cache で別ファイルを指定してください。"
+                    ) from error
 
     @staticmethod
     def key(provider, address):

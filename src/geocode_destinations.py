@@ -45,12 +45,28 @@ DEFAULTS = {
 }
 
 
+def cell_text(value):
+    """ヘッダより列が多い行はリストになるので、文字列に戻す。"""
+    if isinstance(value, list):
+        return ",".join(item or "" for item in value).strip()
+    return (value or "").strip()
+
+
 def read_rows(path, encoding):
-    with Path(path).open(newline="", encoding=encoding) as file:
-        reader = csv.DictReader(file)
-        if reader.fieldnames is None or "address" not in reader.fieldnames:
-            raise SystemExit(f"{path} に address 列がありません。")
-        return [{(key or "").strip(): (value or "").strip() for key, value in row.items()} for row in reader]
+    try:
+        with Path(path).open(newline="", encoding=encoding) as file:
+            reader = csv.DictReader(file)
+            if reader.fieldnames is None or "address" not in reader.fieldnames:
+                raise SystemExit(f"{path} に address 列がありません。")
+            return [
+                {(key or "").strip(): cell_text(value) for key, value in row.items()}
+                for row in reader
+            ]
+    except UnicodeDecodeError as error:
+        raise SystemExit(
+            f"{path} を {encoding} で読めませんでした。"
+            " Excel由来のCSVなら --encoding cp932 を試してください。"
+        ) from error
 
 
 def build_row(index, source, location):
@@ -96,7 +112,7 @@ def needs_geocoding(rows):
     return any(not (row.get("lat") and row.get("lng")) for row in rows)
 
 
-def ensure_coordinates(rows, geocoder=None, cache_path=DEFAULT_CACHE_FILE):
+def ensure_coordinates(rows, geocoder=None, cache_path=None):
     """lat/lng が欠けている行だけジオコーディングする。
 
     すでに座標がある場合はAPIを一切呼ばないので、既存のCSV経路はキーなしでも動く。
@@ -104,7 +120,7 @@ def ensure_coordinates(rows, geocoder=None, cache_path=DEFAULT_CACHE_FILE):
     if not needs_geocoding(rows):
         return rows
 
-    geocoder = geocoder or Geocoder(cache=GeocodeCache(cache_path))
+    geocoder = geocoder or Geocoder(cache=GeocodeCache(cache_path or DEFAULT_CACHE_FILE))
     try:
         resolved, failures = geocode_rows(rows, geocoder)
     finally:

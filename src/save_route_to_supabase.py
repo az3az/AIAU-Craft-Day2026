@@ -20,6 +20,7 @@ import os
 from urllib.parse import quote
 
 from geocode_destinations import ensure_coordinates
+from geocoder import GeocodeError
 from route_optimizer import load_destinations, optimize_route, resolve_start_point
 from supabase_client import SupabaseClient, SupabaseError
 
@@ -145,6 +146,11 @@ def main():
         help="--source csv のときに読むCSV (既定: data/sample_delivery_destinations.csv)",
     )
     parser.add_argument(
+        "--geocode-cache",
+        default=os.environ.get("GEOCODE_CACHE"),
+        help="ジオコーディングキャッシュのファイル (既定: data/geocode_cache.json)",
+    )
+    parser.add_argument(
         "--dry-run",
         action="store_true",
         help="Supabaseに保存せず、保存予定の内容を表示する",
@@ -157,7 +163,10 @@ def main():
 
     if args.source == "csv":
         # lat/lng の無い住所CSVでも、その場でジオコーディングして続行する。
-        destinations = ensure_coordinates(load_destinations(args.input))
+        destinations = ensure_coordinates(
+            load_destinations(args.input),
+            cache_path=args.geocode_cache,
+        )
     else:
         destinations = fetch_destinations(client)
         if not destinations:
@@ -190,5 +199,5 @@ def main():
 if __name__ == "__main__":
     try:
         main()
-    except SupabaseError as error:
+    except (SupabaseError, GeocodeError) as error:
         raise SystemExit(str(error)) from error

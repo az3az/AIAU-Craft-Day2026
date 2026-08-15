@@ -4,7 +4,7 @@ import math
 import os
 from pathlib import Path
 
-from geocoder import Geocoder
+from geocoder import Geocoder, GeocodeError
 
 
 BASE_DIR = Path(__file__).resolve().parents[1]
@@ -159,4 +159,7 @@ def main():
 
 
 if __name__ == "__main__":
-    main()
+    try:
+        main()
+    except GeocodeError as error:
+        raise SystemExit(str(error)) from error
