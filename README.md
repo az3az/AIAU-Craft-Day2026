@@ -43,6 +43,39 @@ python3 src/route_optimizer.py
 
 実行すると、`output/optimized_route.csv` が作成されます。
 
+## Fly.ioでのデプロイ手順
+
+Dockerで動かすための `Dockerfile` と `fly.toml` をリポジトリのルートに用意しています。
+
+```bash
+# 初回のみ（fly.toml があるので既存設定を使う）
+fly launch --no-deploy
+
+# アプリ名を変えたい場合は fly.toml の app を書き換える
+
+# デプロイ
+fly deploy
+
+# 実行（バッチなので都度マシンを起動して流す）
+fly machine run . --command "python3 src/route_optimizer.py"
+
+# ログ確認
+fly logs
+```
+
+ローカルでDockerだけ試す場合は次の通りです。
+
+```bash
+docker build -t aiau-craft-day2026 .
+docker run --rm aiau-craft-day2026
+```
+
+### 注意
+
+- `src/route_optimizer.py` は一度実行して終了するバッチスクリプトです。Fly.ioの常駐アプリ（Webサーバー）用途とは異なるため、`fly.toml` には `[http_service]` を設定していません。
+- 常駐させてブラウザから使いたい場合は、別途HTTPサーバー化（Flask / FastAPI などでエンドポイントを用意する）が必要です。
+- コンテナ内の `output/optimized_route.csv` はマシン停止時に消えます。結果を残したい場合はVolumeやSupabase、Google Sheetsなど外部への出力を検討してください。
+
 ## Google Sheetsで使う流れ
 
 1. Google Sheetsを作る

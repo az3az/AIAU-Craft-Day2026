@@ -1,0 +1,14 @@
+app = "aiau-craft-day2026"
+primary_region = "nrt"
+
+[build]
+  dockerfile = "Dockerfile"
+
+# 実行後に終了するバッチ処理のため、常駐Webサーバー用の [http_service] は定義しない。
+# restart policy を "no" にして、プロセス終了時に再起動されないようにする。
+[[vm]]
+  size = "shared-cpu-1x"
+  memory = "256mb"
+
+[[restart]]
+  policy = "no"
