@@ -142,6 +142,18 @@ docker run --rm aiau-craft-day2026 python3 src/route_optimizer.py
 GRANT も外しています。外に公開するのは `latest_route_stops` ビューだけで、
 このビューに `grant select ... to anon` しています。
 
+### 依存パッケージ
+
+Supabaseに接続するスクリプト (`src/import_destinations.py` / `src/save_route_to_supabase.py`) は
+certifi を使います。`src/route_optimizer.py` だけを動かす場合は不要です。
+
+```bash
+pip install -r requirements.txt
+```
+
+CA証明書が入っていない環境でも `SSL_CERT_FILE` を手で指定せずに接続できるよう、
+certifi のCA束から作った `SSLContext` を使っています。
+
 ### 環境変数 (ローカルの管理スクリプト用)
 
 ```bash
