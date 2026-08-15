@@ -48,6 +48,43 @@ python3 src/route_optimizer.py
 
 実行すると、`output/optimized_route.csv` が作成されます。
 
+## Fly.ioでのデプロイ手順
+
+Dockerで動かすための `Dockerfile` と `fly.toml` をリポジトリのルートに用意しています。
+
+このスクリプトは実行後すぐ終了するバッチのため、常駐アプリ向けの `fly deploy` ではなく「イメージをpush → 単発マシンで実行」の流れを使います。
+
+```bash
+# 初回のみ（アプリを作成。fly.toml の app 名を変えたい場合は先に書き換える）
+fly apps create aiau-craft-day2026
+
+# イメージをビルドしてFlyのレジストリにpush（マシンは作らない）
+fly deploy --build-only --push -a aiau-craft-day2026
+# → 最後に image: registry.fly.io/aiau-craft-day2026:deployment-XXXX が表示される
+
+# 単発実行（--detach を付ける。実行後にマシンは自動削除される）
+fly machine run registry.fly.io/aiau-craft-day2026:deployment-XXXX \
+  --command "python3 src/route_optimizer.py" \
+  --rm --detach -a aiau-craft-day2026 --region nrt
+
+# 実行結果の確認
+fly logs -a aiau-craft-day2026 --no-tail
+```
+
+ローカルでDockerだけ試す場合は次の通りです。
+
+```bash
+docker build -t aiau-craft-day2026 .
+docker run --rm aiau-craft-day2026
+```
+
+### 注意
+
+- `src/route_optimizer.py` は一度実行して終了するバッチスクリプトです。Fly.ioの常駐アプリ（Webサーバー）用途とは異なるため、`fly.toml` には `[http_service]` を設定していません。
+- そのため `fly deploy`（および `--detach` なしの `fly machine run`）は、マシンが起動状態を維持しないため `timeout reached waiting for machine's state to change` というエラーで終了します。処理自体は成功しており（`fly logs` に `配送順を作成しました` と `Main child exited normally with code: 0` が出ます）、上記の `--build-only --push` + `--detach` の手順を使えばエラーになりません。
+- 常駐させてブラウザから使いたい場合は、別途HTTPサーバー化（Flask / FastAPI などでエンドポイントを用意する）が必要です。
+- コンテナ内の `output/optimized_route.csv` はマシン停止時に消えます。結果を残したい場合はVolumeやSupabase、Google Sheetsなど外部への出力を検討してください。
+
 ## Supabaseで使う
 
 ### テーブル構成

@@ -1,0 +1,12 @@
+.git
+.gitignore
+docs/
+apps-script/
+README.md
+__pycache__/
+*.pyc
+.DS_Store
+.env
+fly.toml
+Dockerfile
+.dockerignore
