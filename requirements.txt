@@ -1,0 +1,2 @@
+# CA証明書束。SSL_CERT_FILE を手で指定しなくてもSupabaseに接続できるようにする。
+certifi>=2024.8.30

@@ -53,29 +53,58 @@ python3 src/route_optimizer.py
 Dockerで動かすための `Dockerfile` と `fly.toml` をリポジトリのルートに用意しています。
 
 このスクリプトは実行後すぐ終了するバッチのため、常駐アプリ向けの `fly deploy` ではなく「イメージをpush → 単発マシンで実行」の流れを使います。
+コンテナ内のファイルは残らないため、既定の実行内容は `src/save_route_to_supabase.py`（Supabaseへ結果を保存）にしています。
 
 ```bash
 # 初回のみ（アプリを作成。fly.toml の app 名を変えたい場合は先に書き換える）
 fly apps create aiau-craft-day2026
+
+# Supabaseの接続情報をシークレットとして登録（実行時に環境変数として渡される）
+fly secrets set -a aiau-craft-day2026 \
+  SUPABASE_URL="https://xxxxxxxx.supabase.co" \
+  SUPABASE_SERVICE_ROLE_KEY="..."
 
 # イメージをビルドしてFlyのレジストリにpush（マシンは作らない）
 fly deploy --build-only --push -a aiau-craft-day2026
 # → 最後に image: registry.fly.io/aiau-craft-day2026:deployment-XXXX が表示される
 
 # 単発実行（--detach を付ける。実行後にマシンは自動削除される）
+# 既定のコマンドは python3 src/save_route_to_supabase.py（--source supabase）
 fly machine run registry.fly.io/aiau-craft-day2026:deployment-XXXX \
-  --command "python3 src/route_optimizer.py" \
+  --env ROUTE_RUN_LABEL="2026-02-01_午前便" \
   --rm --detach -a aiau-craft-day2026 --region nrt
 
-# 実行結果の確認
+# 実行結果の確認（route_run_id=... に N件の配送順を保存しました と出る）
 fly logs -a aiau-craft-day2026 --no-tail
 ```
+
+配送先マスタがまだ空の場合は、先にCSVの取込みを流します。
+
+```bash
+fly machine run registry.fly.io/aiau-craft-day2026:deployment-XXXX \
+  --command "python3 src/import_destinations.py" \
+  --rm --detach -a aiau-craft-day2026 --region nrt
+```
+
+実行内容は `--command` で切り替えられます。
+
+| やりたいこと | `--command` |
+| --- | --- |
+| Supabaseに保存（既定） | 指定なし |
+| 手元CSVの配送先から作って保存 | `python3 src/save_route_to_supabase.py --source csv` |
+| CSVを作るだけ（Supabase不要） | `python3 src/route_optimizer.py` |
+| 配送先CSVの取込み | `python3 src/import_destinations.py` |
 
 ローカルでDockerだけ試す場合は次の通りです。
 
 ```bash
 docker build -t aiau-craft-day2026 .
-docker run --rm aiau-craft-day2026
+
+# Supabaseに保存（.env に SUPABASE_URL / SUPABASE_SERVICE_ROLE_KEY がある想定）
+docker run --rm --env-file .env aiau-craft-day2026
+
+# CSVを作るだけ
+docker run --rm aiau-craft-day2026 python3 src/route_optimizer.py
 ```
 
 ### 注意
@@ -83,7 +112,8 @@ docker run --rm aiau-craft-day2026
 - `src/route_optimizer.py` は一度実行して終了するバッチスクリプトです。Fly.ioの常駐アプリ（Webサーバー）用途とは異なるため、`fly.toml` には `[http_service]` を設定していません。
 - そのため `fly deploy`（および `--detach` なしの `fly machine run`）は、マシンが起動状態を維持しないため `timeout reached waiting for machine's state to change` というエラーで終了します。処理自体は成功しており（`fly logs` に `配送順を作成しました` と `Main child exited normally with code: 0` が出ます）、上記の `--build-only --push` + `--detach` の手順を使えばエラーになりません。
 - 常駐させてブラウザから使いたい場合は、別途HTTPサーバー化（Flask / FastAPI などでエンドポイントを用意する）が必要です。
-- コンテナ内の `output/optimized_route.csv` はマシン停止時に消えます。結果を残したい場合はVolumeやSupabase、Google Sheetsなど外部への出力を検討してください。
+- コンテナ内の `output/optimized_route.csv` はマシン停止時に消えます。そのためFly上では既定でSupabaseに保存する構成にしています。CSVを成果物として残したい場合はVolumeのマウントなどが別途必要です。
+- `SUPABASE_SERVICE_ROLE_KEY` は `fly secrets set` で登録します（`fly.toml` の `[env]` には書かないでください。`fly.toml` はリポジトリにコミットされます）。
 
 ## Supabaseで使う
 
@@ -111,6 +141,18 @@ docker run --rm aiau-craft-day2026
 テーブル本体は RLS を有効にした上で anon / authenticated のポリシーを一切作らず、
 GRANT も外しています。外に公開するのは `latest_route_stops` ビューだけで、
 このビューに `grant select ... to anon` しています。
+
+### 依存パッケージ
+
+Supabaseに接続するスクリプト (`src/import_destinations.py` / `src/save_route_to_supabase.py`) は
+certifi を使います。`src/route_optimizer.py` だけを動かす場合は不要です。
+
+```bash
+pip install -r requirements.txt
+```
+
+CA証明書が入っていない環境でも `SSL_CERT_FILE` を手で指定せずに接続できるよう、
+certifi のCA束から作った `SSLContext` を使っています。
 
 ### 環境変数 (ローカルの管理スクリプト用)
 

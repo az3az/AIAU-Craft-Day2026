@@ -1,6 +1,8 @@
 """Supabase (PostgREST) への最小クライアント。
 
-追加ライブラリを入れずに動かせるように、標準ライブラリだけで書いています。
+依存は certifi だけです (requirements.txt)。CA証明書が入っていないコンテナなどでも
+SSL_CERT_FILE を手で指定せずに動くよう、certifi のCA束を使った SSLContext を
+urlopen に渡しています。
 
 必要な環境変数:
     SUPABASE_URL               例: https://xxxxxxxx.supabase.co
@@ -9,12 +11,20 @@
 
 import json
 import os
+import ssl
 import urllib.error
 import urllib.request
+
+import certifi
 
 
 class SupabaseError(RuntimeError):
     pass
+
+
+def create_ssl_context():
+    """certifi のCA束を使う SSLContext を返す。"""
+    return ssl.create_default_context(cafile=certifi.where())
 
 
 class SupabaseClient:
@@ -28,6 +38,8 @@ class SupabaseClient:
             raise SupabaseError(
                 "SUPABASE_URL と SUPABASE_SERVICE_ROLE_KEY を環境変数に設定してください。"
             )
+
+        self.ssl_context = create_ssl_context()
 
     def _request(self, method, path, payload=None, prefer=None, query=None):
         endpoint = f"{self.url}/rest/v1/{path}"
@@ -43,7 +55,7 @@ class SupabaseClient:
             request.add_header("Prefer", prefer)
 
         try:
-            with urllib.request.urlopen(request) as response:
+            with urllib.request.urlopen(request, context=self.ssl_context) as response:
                 raw = response.read().decode("utf-8")
         except urllib.error.HTTPError as error:
             detail = error.read().decode("utf-8", errors="replace")
