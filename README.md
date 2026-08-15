@@ -18,6 +18,7 @@ output/
   optimized_route.csv                作成された配送順
 src/
   route_optimizer.py                 ローカル確認用
+  extract_tasks_from_excel.py        スケジュールExcelから中間CSVを抽出する
   supabase_client.py                 Supabase REST APIへの最小クライアント
   import_destinations.py             配送先CSVをSupabaseに取り込む
   save_route_to_supabase.py          ルート結果をSupabaseに保存する
@@ -47,6 +48,49 @@ python3 src/route_optimizer.py
 ```
 
 実行すると、`output/optimized_route.csv` が作成されます。
+
+## スケジュールExcelからタスク候補を抽出する
+
+運用中の日別シート形式のExcel (例: `2026年8月スケジュール.xlsx`) を、そのままルート最適化に
+使うのは無理があるので、**人が見て補正できる中間CSV** に落とすステップを用意しています。
+
+```bash
+pip install -r requirements.txt
+
+python3 src/extract_tasks_from_excel.py \
+  --input "2026年8月スケジュール.xlsx" \
+  --output data/tasks_2026-08.csv
+
+# 特定日だけ / 書き出さずに件数だけ見る
+python3 src/extract_tasks_from_excel.py --input "..." --sheet 815 --sheet 820
+python3 src/extract_tasks_from_excel.py --input "..." --dry-run
+```
+
+出力列:
+
+```text
+date,task_type,customer,venue_name,address,start_time,end_time,
+required_vehicle,required_staff_count,assigned_vehicle,assigned_staff,origin,notes
+```
+
+読み取っているもの:
+
+| 元のExcel | 出力列 |
+| --- | --- |
+| A列の案件記入欄 (11行1ブロックのテンプレート) | `task_type=案件` の行として1件 |
+| C列以降の担当者列で「＠」を含むセル | 1タスク。`お客様名＠場所` を `customer` / `venue_name` に分割 |
+| 見出しの `【設】` `【設/OP/撤】` など | `task_type` (`設営` / `設営/オペレート/撤去` など。タグ無しは `要確認`) |
+| 2行目の担当者名 | `assigned_staff` |
+| `【10号車】ｾﾝﾀｰ発` / `直行` / `直帰` | `assigned_vehicle` と `origin` (`センター` / `直行`) |
+| `4t` / `2t` / `1BOX` / `ﾊｲﾙｰﾌ` | `required_vehicle` |
+| `設営撤去12名` / `設営撤去+9名` | `required_staff_count` |
+| `10:00 ～ 19:00` / `(11:30)` | `start_time` (指定時刻を優先) / `end_time` |
+| `B26004219(市ヶ谷CC)` | `venue_name=市ヶ谷CC`、伝票番号は `notes` |
+
+判定できなかった記述は捨てずに `notes` に残します。`address` は空で出るので、
+住所と緯度経度は人が補ってから `data/*.csv` (`id,name,address,lat,lng,...`) に整形し、
+`src/import_destinations.py` → `src/save_route_to_supabase.py` の既存の流れに乗せます。
+抽出は読み取り専用で、Supabase保存やSheets表示の流れには手を入れていません。
 
 ## Fly.ioでのデプロイ手順
 
