@@ -1,3 +1,26 @@
+// ルート結果シートの列順。シート内計算 (段階1) と Supabase読み取り (段階2) で共通。
+const ROUTE_SHEET_NAME = 'ルート結果';
+const ROUTE_HEADERS = [
+  '配送順',
+  'ID',
+  '配送先名',
+  '住所',
+  '希望時間',
+  '作業分数',
+  '優先度',
+  '区間距離km',
+  '累計距離km',
+];
+
+function onOpen() {
+  SpreadsheetApp.getUi()
+    .createMenu('配送ルート')
+    .addItem('シートからルート作成 (段階1)', 'optimizeRoute')
+    .addItem('Supabaseから取得 (段階2)', 'importRouteFromSupabase')
+    .addToUi();
+}
+
+// 段階1: 配送先シートを読んで、シート内でルートを作る。Supabaseは使わない。
 function optimizeRoute() {
   const spreadsheet = SpreadsheetApp.getActiveSpreadsheet();
   const sourceSheet = spreadsheet.getSheetByName('配送先');
@@ -21,6 +44,72 @@ function optimizeRoute() {
 
   const route = buildRoute(startPoint, destinations);
   writeRoute(spreadsheet, route);
+}
+
+// 段階2: Supabaseの latest_route_stops ビューを読んで、ルート結果シートに書く。
+// ルート計算は手元の src/save_route_to_supabase.py 側で済ませておく。
+// キーは anon キーを使う (service_role はここには置かない)。
+function importRouteFromSupabase() {
+  const config = getSupabaseConfig();
+  const stops = fetchLatestRouteStops(config);
+
+  if (stops.length === 0) {
+    throw new Error(
+      'Supabaseに完了済みのルートがありません。'
+      + ' 先に src/save_route_to_supabase.py を実行してください。'
+    );
+  }
+
+  const route = stops.map(function(stop) {
+    return [
+      stop.stop_no,
+      stop.external_id,
+      stop.name,
+      stop.address,
+      stop.time_window,
+      stop.service_minutes,
+      stop.priority,
+      Number(stop.leg_distance_km),
+      Number(stop.total_distance_km),
+    ];
+  });
+
+  writeRoute(SpreadsheetApp.getActiveSpreadsheet(), route);
+}
+
+function getSupabaseConfig() {
+  const props = PropertiesService.getScriptProperties();
+  const url = props.getProperty('SUPABASE_URL');
+  const anonKey = props.getProperty('SUPABASE_ANON_KEY');
+
+  if (!url || !anonKey) {
+    throw new Error(
+      'スクリプトプロパティに SUPABASE_URL と SUPABASE_ANON_KEY を設定してください。'
+    );
+  }
+
+  return { url: url.replace(/\/+$/, ''), anonKey: anonKey };
+}
+
+function fetchLatestRouteStops(config) {
+  const endpoint = config.url + '/rest/v1/latest_route_stops?select=*&order=stop_no.asc';
+  const response = UrlFetchApp.fetch(endpoint, {
+    method: 'get',
+    muteHttpExceptions: true,
+    headers: {
+      apikey: config.anonKey,
+      Authorization: 'Bearer ' + config.anonKey,
+    },
+  });
+
+  const status = response.getResponseCode();
+  if (status !== 200) {
+    throw new Error(
+      'Supabaseの読み取りに失敗しました (' + status + '): ' + response.getContentText()
+    );
+  }
+
+  return JSON.parse(response.getContentText());
 }
 
 function rowToDestination(headers) {
@@ -77,31 +166,20 @@ function buildRoute(startPoint, destinations) {
 }
 
 function writeRoute(spreadsheet, route) {
-  const sheetName = 'ルート結果';
-  let outputSheet = spreadsheet.getSheetByName(sheetName);
+  let outputSheet = spreadsheet.getSheetByName(ROUTE_SHEET_NAME);
 
   if (!outputSheet) {
-    outputSheet = spreadsheet.insertSheet(sheetName);
+    outputSheet = spreadsheet.insertSheet(ROUTE_SHEET_NAME);
   }
 
   outputSheet.clear();
-  outputSheet.getRange(1, 1, 1, 9).setValues([[
-    '配送順',
-    'ID',
-    '配送先名',
-    '住所',
-    '希望時間',
-    '作業分数',
-    '優先度',
-    '区間距離km',
-    '累計距離km',
-  ]]);
+  outputSheet.getRange(1, 1, 1, ROUTE_HEADERS.length).setValues([ROUTE_HEADERS]);
 
   if (route.length > 0) {
-    outputSheet.getRange(2, 1, route.length, 9).setValues(route);
+    outputSheet.getRange(2, 1, route.length, ROUTE_HEADERS.length).setValues(route);
   }
 
-  outputSheet.autoResizeColumns(1, 9);
+  outputSheet.autoResizeColumns(1, ROUTE_HEADERS.length);
 }
 
 function distanceKm(a, b) {
