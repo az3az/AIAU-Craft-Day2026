@@ -44,6 +44,7 @@ Supabase を使わずローカルCSVと Sheets だけで動かすことも可能
 | Supabase REST クライアント（certifi によるTLS） | `src/supabase_client.py` | #1, #3 |
 | Apps Script: 段階1のシート内ルート作成 | `apps-script/Code.gs` `optimizeRoute` | #1 |
 | Apps Script: 段階2のSupabase読み取り（anonキーのみ） | `apps-script/Code.gs` `importRouteFromSupabase` | #1 |
+| Apps Script: 段階3の Sheets 完結版（住所の座標化と日付タブ出力） | `apps-script/Code.gs` `createRouteFromInputSheet` | #12 |
 | ルート結果シート上部のメタ情報表示（`latest_route_summary`） | `apps-script/Code.gs`, `supabase/schema.sql` | #7 |
 | ルート結果シートの表示書式（行高・折り返し・列幅・背景色・ヘッダー固定） | `apps-script/Code.gs` | #8 |
 | Fly.io での単発バッチ実行 | `Dockerfile`, `fly.toml` | #3 |
@@ -62,6 +63,7 @@ Supabase を使わずローカルCSVと Sheets だけで動かすことも可能
 | #8 | ルート結果シートの表示書式を整える |
 | #9 | README に提出用サマリーを追加 |
 | #10 | スケジュールExcelからタスク候補CSVを抽出 |
+| #12 | Apps Script 段階3の Sheets 完結版（`createRouteFromInputSheet`） |
 
 ### 未マージ・クローズしたPR
 
@@ -69,9 +71,8 @@ Supabase を使わずローカルCSVと Sheets だけで動かすことも可能
 | --- | --- | --- |
 | #4 | Excel抽出の初版 | クローズ。#10 で作り直したため不要。ブランチ削除済み |
 | #6 | Excel抽出の再作成版 | クローズ。#10 で作り直したため不要。ブランチ削除済み |
-| #12 | Apps Script 段階3の Sheets 完結版（`createRouteFromInputSheet`、住所の座標化と日付タブ出力） | オープン。レビュー待ちで未マージ。7章はこのPRの内容 |
 
-機能の未マージPRは #12 だけです。
+現在オープンな機能PRはありません。
 
 ## 3. ファイル構成
 
@@ -264,7 +265,7 @@ fly machine run <イメージ> --command "python3 src/save_route_to_supabase.py 
   本番・デモでは Google Geocoding API を使ってください。
 - ルート計算は Haversine の直線距離ベースで、道路距離や渋滞は考慮していません。
 
-## 7. Google Sheets 完結版（段階3。PR #12 でレビュー中、main には未マージ）
+## 7. Google Sheets 完結版（段階3。PR #12 で main にマージ済み）
 
 **目的**: ローカルPCやSupabaseを使わなくても、Google Workspace の中だけで配送順を作れる形にする。
 
