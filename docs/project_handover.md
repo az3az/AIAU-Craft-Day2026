@@ -19,6 +19,20 @@ Google Sheets 「ルート結果」シート
 役割分担は、Supabase が「データの正」、Google Sheets が「見る・直す場所」です。
 高権限の `service_role` はローカル管理スクリプトとバッチ実行にだけ使い、Sheets 側には置きません。
 
+Google Sheets の具体的な設定手順は [google_sheets_setup.md](google_sheets_setup.md) にまとめています。
+
+### Supabase の役割
+
+| 役割 | 内容 |
+| --- | --- |
+| データの正 | 配送先マスタ（`delivery_destinations`）と、実行ごとのルート（`route_runs` / `route_stops`）を保持する |
+| 履歴 | 実行のたびに `route_runs` が増えるため、過去のルートを後から参照できる |
+| 公開の窓口 | `latest_route_stops` / `latest_route_summary` の2ビューだけを anon に公開し、Sheets はここだけを読む |
+| 権限の壁 | 3テーブルは RLS 有効 + anon/authenticated から revoke。書き込みは `service_role` を持つローカル/バッチのみ |
+
+最新ルートの選び方は `where status in ('completed','exported') order by created_at desc, id desc limit 1` です。
+Supabase を使わずローカルCSVと Sheets だけで動かすことも可能で、その場合は履歴と共有が失われます。
+
 ## 2. main に入っている機能（すべてマージ済み）
 
 | 機能 | 実装 | 対応PR |
@@ -78,6 +92,7 @@ supabase/schema.sql                  テーブル・ビュー・RLS・grant
 apps-script/Code.gs                  Google Sheets 用スクリプト
 docs/feature_ideas.md                機能案
 docs/project_handover.md             この資料
+docs/google_sheets_setup.md          Google Sheets 側の設定手順
 Dockerfile / fly.toml                Fly.io 用
 ```
 
@@ -94,7 +109,40 @@ Dockerfile / fly.toml                Fly.io 用
 
 `.env` は `.gitignore` 済みです。鍵・実住所・顧客名はコミットしません。
 
+## 4.1 使ってはいけないキー・データ
+
+禁止:
+
+- `SUPABASE_SERVICE_ROLE_KEY` を Apps Script のスクリプトプロパティ、スプレッドシートのセル、
+  クライアント側コード、リポジトリに置くこと。RLS を無視して全書き込みができてしまいます。
+- 鍵・トークン（Supabase の各キー、`GOOGLE_MAPS_API_KEY`、Fly のトークン）をコミットすること。
+  値は `.env`（`.gitignore` 済み）、Fly secrets、Apps Script のスクリプトプロパティにだけ置きます。
+- 実在の顧客名・スタッフ名・取引先名・実住所・伝票番号を、コード・サンプルCSV・README・PR説明・
+  Issue に書くこと。サンプルは `◯◯様＠△△会場` のような匿名の値を使います。
+- 会社のスケジュールExcelやそこから作った中間CSVをコミットすること（`data/` の生成物と
+  `data/geocode_cache.json` は `.gitignore` 対象）。
+- 本番・デモで Nominatim を使うこと（存在しない住所を別地点にマッチさせるため、開発確認専用）。
+
+使ってよいもの:
+
+- `SUPABASE_ANON_KEY`（公開ビューの読み取りのみ。Apps Script に置いてよい唯一の Supabase キー）
+- 匿名化したサンプル（`data/sample_addresses.csv`、`data/sample_delivery_destinations.csv`）
+
 ## 5. 動作確認済みの手順（そのまま再現できます）
+
+### 5.0 ハッカソンで通した流れ
+
+```text
+住所だけのCSV
+  → src/geocode_destinations.py で緯度経度を付与（結果はキャッシュ）
+  → src/route_optimizer.py で配送順を作成（起点は東京駅／センター切替）
+  → src/import_destinations.py で配送先をSupabaseへ取込
+  → src/save_route_to_supabase.py でルートをSupabaseへ保存
+  → Google Sheets の importRouteFromSupabase で「ルート結果」シートに表示
+```
+
+この通し確認はプロジェクト所有者のローカル環境で成功しています。途中で Python の TLS 証明書エラーが
+出たため、`certifi` を使う対応を入れて解消しました。以下は各ステップの再実行手順です。
 
 ### 5.1 準備
 
@@ -155,6 +203,8 @@ python3 src/save_route_to_supabase.py --source csv --input data/geocoded_destina
 文字コードが違うCSVは `--encoding cp932` のように指定します。
 
 ### 5.6 Google Sheets で見る
+
+詳細と、つまずいたときの対処は [google_sheets_setup.md](google_sheets_setup.md) にあります。
 
 段階1（Supabaseなし）:
 
@@ -241,6 +291,44 @@ Python を実行できる人がいないと使えません。ここを Apps Scri
 - APIキーがスクリプトプロパティにあり、コード・シート・リポジトリのどこにも鍵が無い
 - 既存の `importRouteFromSupabase`（段階2）の動作を壊していない
 - 明細の列順（配送順, ID, 配送先名, 住所, 希望時間, 作業分数, 優先度, 区間距離km, 累計距離km）を維持している
+
+## 7.1 日付ごとのシートタブ作成要件
+
+配車は日単位で動くため、Google Sheets 完結版では1日1タブに分ける必要があります。
+
+要件:
+
+- タブ名は `YYYY-MM-DD`（例: `2026-08-15`）で統一する。並べ替えと検索がしやすいため。
+- 「その日のタブを作る」操作をメニューから実行できるようにし、日付を指定して作成する。
+- 新しいタブはテンプレートシート（列構成・書式・数式を持つ雛形）を複製して作る。列構成を手で作らせない。
+- 同名タブが既にある場合は上書きせず、そのタブに移動して知らせる。
+- ルート結果は日付タブごとに書き出し、他の日のタブを壊さない。
+- 一覧タブ（例: `日付一覧`）に、日付・配送先件数・合計距離・最終更新をまとめ、各タブへのリンクを置く。
+- 古いタブは自動削除しない。手動アーカイブとし、消える動作は作らない。
+- Supabase と併用する場合は、日付タブと `route_runs.delivery_date` を対応させ、
+  取り込み時に日付が一致する run を読む。
+
+## 7.2 ターミナルを使えないスタッフ向けの将来フロー
+
+最終的に、配車担当者がコマンドを一切打たずに完結する形を目指します。
+
+想定フロー:
+
+1. 担当者がスプレッドシートを開く
+2. メニュー `配送ルート > 今日のタブを作る` で日付タブを作る
+3. 配送先の住所を貼り付ける（座標は不要）
+4. メニュー `配送ルート > 住所から座標を取得` を実行する（Apps Script が Geocoding API を呼ぶ）
+5. メニュー `配送ルート > ルート作成` を実行する
+6. 上部にメタ情報、下部に配送順が表示される
+7. 必要なら順序を手で入れ替え、再計算せずそのまま印刷・共有する
+
+満たすべき条件:
+
+- インストール作業ゼロ。ブラウザとGoogleアカウントだけで使える。
+- エラーは日本語で、次にやることが分かる文言にする（例: 「住所が空の行が3件あります」）。
+- APIキーなどの設定は管理者が一度スクリプトプロパティに入れるだけで、担当者は触らない。
+- 実行の途中で失敗しても、シートの既存データを壊さない。
+- 定期実行が要る場合は、Apps Script のトリガーか Fly.io のバッチを管理者側で設定する。
 
 ## 8. その後の開発候補
 
