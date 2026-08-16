@@ -110,7 +110,8 @@ VEHICLE_PATTERN = re.compile(
 ASSIGNED_VEHICLE_PATTERN = re.compile(r"(\d+号車)")
 STAFF_COUNT_PATTERN = re.compile(r"(?:設営撤去|設営|撤去|立会|立ち合い)[^0-9]{0,4}(\d+)\s*名")
 MOVEMENT_PATTERN = re.compile(r"(ｾﾝﾀｰ発|センター発|ｾﾝﾀｰ出社|センター出社|ｾﾝﾀｰ移動|センター移動|直行|直帰)")
-SHEET_NAME_PATTERN = re.compile(r"^(\d{1,2})(\d{1,2})$")
+# シート名の日は2桁固定。貪欲マッチだと "815" が 81月 5日 になる。
+SHEET_NAME_PATTERN = re.compile(r"^(\d{1,2})(\d{2})$")
 # 「10:00 ～ 19:00」のような作業可能帯と、「(11:30)」のような指定時刻。
 TIME_RANGE_PATTERN = re.compile(r"(\d{1,2}:\d{2})\s*[～~〜-]\s*(\d{1,2}:\d{2})")
 APPOINTMENT_PATTERN = re.compile(r"[(（](\d{1,2}:\d{2})[)）]")
@@ -158,8 +159,9 @@ def sheet_date(worksheet, sheet_name, year, month):
     match = SHEET_NAME_PATTERN.match(sheet_name)
     if match and year:
         sheet_month, day = int(match.group(1)), int(match.group(2))
+        # 複数月にまたがるブックでも合うように、シート名由来の月を優先する。
         try:
-            return dt.date(year, month or sheet_month, day).isoformat()
+            return dt.date(year, sheet_month or month, day).isoformat()
         except ValueError:
             return ""
     return ""
@@ -451,7 +453,7 @@ def main():
         help="対象シート名。複数指定可 (既定: 全シート)",
     )
     parser.add_argument("--year", type=int, help="A1に日付が無いシート用の年")
-    parser.add_argument("--month", type=int, help="A1に日付が無いシート用の月")
+    parser.add_argument("--month", type=int, help="A1の日付もシート名の月も取れないシート用の月")
     parser.add_argument(
         "--dry-run",
         action="store_true",
