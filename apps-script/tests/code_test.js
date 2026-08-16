@@ -237,19 +237,73 @@ run('createRouteFromInputSheet: 上限超えは座標だけ書き戻し、ルー
   assert.strictEqual(sheets[1].data.length, 98);  // メタ6 + 空行 + ヘッダー + 明細90
 });
 
-run('createRouteFromInputSheet: 配送日が無いと分かるエラー', () => {
+run('createRouteFromInputSheet: 配送日が無ければ今日の日付を使って書き戻す', () => {
   const input = makeSheet('配送先入力', [
     ['address'],
     ['東京都港区海岸1-7-1'],
   ]);
+  const created = [];
   spreadsheet = {
     getSheetByName: () => input,
     getSheets: () => [input],
-    insertSheet: (n) => makeSheet(n, []),
+    insertSheet: (n) => { const s = makeSheet(n, []); created.push(s); return s; },
+    setActiveSheet: () => {},
+    toast: (msg) => { sheetValues.toast = msg; },
+  };
+
+  sandbox.createRouteFromInputSheet();
+  assert.strictEqual(created[0].getName(), today() + '_配送ルート');
+  assert.strictEqual(input.data[0][0], '配送日');
+  assert.strictEqual(input.data[0][1], today());
+  assert.strictEqual(input.data[1][0], 'address');
+  // 行が1つ下がっても座標は元の住所の行に書き戻される
+  assert.strictEqual(input.data[2][0], '東京都港区海岸1-7-1');
+  assert.strictEqual(input.data[1][2], 'lat');
+  assert.strictEqual(input.data[2][2], 35.6560);
+  assert.strictEqual(input.data[2][3], 139.7570);
+  assert.ok(/今日/.test(sheetValues.toast));
+});
+
+run('createRouteFromInputSheet: 配送日ラベルがあれば右のセルに今日の日付を入れる', () => {
+  const input = makeSheet('配送先入力', [
+    ['配送日', ''],
+    [],
+    ['id', 'name', 'address', 'priority'],
+    ['D01', '公共施設A', '東京都港区海岸1-7-1', '1'],
+  ]);
+  const created = [];
+  spreadsheet = {
+    getSheetByName: () => input,
+    getSheets: () => [input],
+    insertSheet: (n) => { const s = makeSheet(n, []); created.push(s); return s; },
     setActiveSheet: () => {},
     toast: () => {},
   };
-  assert.throws(() => sandbox.createRouteFromInputSheet(), /配送日が分かりません/);
+
+  sandbox.createRouteFromInputSheet();
+  assert.strictEqual(input.data[0][1], today());
+  assert.strictEqual(created[0].getName(), today() + '_配送ルート');
+  assert.strictEqual(input.data[3][2], '東京都港区海岸1-7-1');
+});
+
+run('createRouteFromInputSheet: delivery_date 列があれば今日の日付で上書きしない', () => {
+  const input = makeSheet('配送先入力', [
+    ['address', 'delivery_date'],
+    ['東京都港区海岸1-7-1', '2026-08-15'],
+  ]);
+  const created = [];
+  spreadsheet = {
+    getSheetByName: () => input,
+    getSheets: () => [input],
+    insertSheet: (n) => { const s = makeSheet(n, []); created.push(s); return s; },
+    setActiveSheet: () => {},
+    toast: () => {},
+  };
+
+  sandbox.createRouteFromInputSheet();
+  assert.strictEqual(created[0].getName(), '2026-08-15_配送ルート');
+  assert.strictEqual(input.data[0][0], 'address');
+  assert.strictEqual(input.data.length, 2);
 });
 
 run('createRouteFromInputSheet: 入力シートが無いと分かるエラー', () => {
