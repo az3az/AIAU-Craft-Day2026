@@ -1,5 +1,29 @@
 # AIAU Craft Day 2026 - 配送ルート作成
 
+## 提出用サマリー
+
+ランダムに並んだ配送先住所CSVから、Google Geocoding APIで緯度経度を取得し、会社センターを起点に配送順を作成する配送ルート支援ツールです。
+
+現在の配送ルート作成は人手に依存しやすく、住所確認、順番決め、結果共有に手間がかかります。このプロジェクトでは、住所CSVを取り込み、座標化し、優先度と距離をもとに配送順を作成します。作成したルートはSupabaseに保存し、Google Sheets上で最新ルート、起点、合計距離、配送先件数、配送順を確認できます。
+
+### デモで確認できること
+
+- 住所CSVから配送先データを作成
+- 会社センターを起点にした配送順の作成
+- ルート結果のSupabase保存
+- Google Sheetsでの最新ルート表示
+- 配送順、配送先、住所、区間距離、累計距離の確認
+
+### 技術構成
+
+Python, Google Geocoding API, Supabase, Google Sheets, Apps Script, GitHub, Devin, Codex
+
+### 今後やりたいこと
+
+複数車両対応、配送時間帯制約、スタッフ稼働状況との連携、実配送結果との差分比較を追加したいです。また、今後はFly.ioなどにルート作成バッチを配置し、手元PCに依存しない実行や定期実行に対応したいです。
+
+## 概要
+
 配送先リストから、配送しやすい順番のルートを作り、最終的にGoogle Sheetsへ出力するためのハッカソン用プロジェクトです。
 
 ## まず作るもの
@@ -21,6 +45,7 @@ src/
   route_optimizer.py                 ローカル確認用
   geocoder.py                        住所 → 緯度経度 (キャッシュ付き)
   geocode_destinations.py            住所CSV → 配送先CSV
+  extract_tasks_from_excel.py        スケジュールExcelから中間CSVを抽出する
   supabase_client.py                 Supabase REST APIへの最小クライアント
   import_destinations.py             配送先CSVをSupabaseに取り込む
   save_route_to_supabase.py          ルート結果をSupabaseに保存する
@@ -110,6 +135,49 @@ ROUTE_ORIGIN_ADDRESS="東京都江東区新木場1丁目" \
 
 起点は `route_runs.start_name` / `start_address` / `start_lat` / `start_lng` にそのまま保存されるので、Google Sheets 側の表示経路は変えずに使えます。
 
+## スケジュールExcelからタスク候補を抽出する
+
+運用中の日別シート形式のExcel (例: `2026年8月スケジュール.xlsx`) を、そのままルート最適化に
+使うのは無理があるので、**人が見て補正できる中間CSV** に落とすステップを用意しています。
+
+```bash
+pip install -r requirements.txt
+
+python3 src/extract_tasks_from_excel.py \
+  --input "2026年8月スケジュール.xlsx" \
+  --output data/tasks_2026-08.csv
+
+# 特定日だけ / 書き出さずに件数だけ見る
+python3 src/extract_tasks_from_excel.py --input "..." --sheet 815 --sheet 820
+python3 src/extract_tasks_from_excel.py --input "..." --dry-run
+```
+
+出力列:
+
+```text
+date,task_type,customer,venue_name,address,start_time,end_time,
+required_vehicle,required_staff_count,assigned_vehicle,assigned_staff,origin,notes
+```
+
+読み取っているもの:
+
+| 元のExcel | 出力列 |
+| --- | --- |
+| A列の案件記入欄 (11行1ブロックのテンプレート) | `task_type=案件` の行として1件 |
+| C列以降の担当者列で「＠」を含むセル | 1タスク。`お客様名＠場所` を `customer` / `venue_name` に分割 |
+| 見出しの `【設】` `【設/OP/撤】` など | `task_type` (`設営` / `設営/オペレート/撤去` など。タグ無しは `要確認`) |
+| 2行目の担当者名 | `assigned_staff` |
+| `【10号車】ｾﾝﾀｰ発` / `直行` / `直帰` | `assigned_vehicle` と `origin` (`センター` / `直行`) |
+| `4t` / `2t` / `1BOX` / `ﾊｲﾙｰﾌ` | `required_vehicle` |
+| `設営撤去12名` / `設営撤去+9名` | `required_staff_count` |
+| `10:00 ～ 19:00` / `(11:30)` | `start_time` (指定時刻を優先) / `end_time` |
+| `A12345678(◯◯会場)` | `venue_name=◯◯会場`、伝票番号は `notes` |
+
+判定できなかった記述は捨てずに `notes` に残します。`address` は空で出るので、
+住所と緯度経度は人が補ってから `data/*.csv` (`id,name,address,lat,lng,...`) に整形し、
+`src/import_destinations.py` → `src/save_route_to_supabase.py` の既存の流れに乗せます。
+抽出は読み取り専用で、Supabase保存やSheets表示の流れには手を入れていません。
+
 ## Fly.ioでのデプロイ手順
 
 Dockerで動かすための `Dockerfile` と `fly.toml` をリポジトリのルートに用意しています。
@@ -187,7 +255,8 @@ docker run --rm aiau-craft-day2026 python3 src/route_optimizer.py
 | `delivery_destinations` | 配送先マスタ。CSVの `id` は `external_id` に入り、再取込みは upsert になる |
 | `route_runs` | ルート作成1回分。出発地点・合計距離・件数・状態を持つ |
 | `route_stops` | ルート結果の明細。`route_runs` に紐づく配送順1件が1行 |
-| `latest_route_stops` | 直近のルート結果を、シートの列順で読むためのビュー |
+| `latest_route_stops` | 直近のルート結果の明細を、シートの列順で読むためのビュー |
+| `latest_route_summary` | 同じルートのメタ情報 (ルート名・起点・合計距離・件数・作成日時) を1行だけ返すビュー |
 
 定義は `supabase/schema.sql` にあります。Supabase Studio の SQL Editor に貼り付けて実行してください。
 
@@ -196,14 +265,14 @@ docker run --rm aiau-craft-day2026 python3 src/route_optimizer.py
 | キー | 使う場所 | 見える範囲 |
 | --- | --- | --- |
 | service_role | 手元の管理スクリプト (`src/*.py`) だけ | 全テーブル (RLSをバイパス) |
-| anon | Apps Script / 読み取り側 | `latest_route_stops` ビューのみ |
+| anon | Apps Script / 読み取り側 | `latest_route_stops` / `latest_route_summary` ビューのみ |
 
 **service_role キーは Apps Script には置きません。** Apps Script のコードやスクリプトプロパティは
 そのスプレッドシートの編集権を持つ人が見られるため、全テーブルに書き込めるキーを置くのは危険です。
 
 テーブル本体は RLS を有効にした上で anon / authenticated のポリシーを一切作らず、
-GRANT も外しています。外に公開するのは `latest_route_stops` ビューだけで、
-このビューに `grant select ... to anon` しています。
+GRANT も外しています。外に公開するのは `latest_route_stops` と `latest_route_summary` の
+2つのビューだけで、このビューに `grant select ... to anon` しています。
 
 ### 依存パッケージ
 
@@ -292,8 +361,30 @@ python3 src/save_route_to_supabase.py --source csv --dry-run
 
 ## Google SheetsでSupabaseの結果を見る (段階2)
 
-ルート計算は手元で済ませ、Apps Script は `latest_route_stops` を読むだけにします。
-使う関数は `importRouteFromSupabase` で、書き出し先は段階1と同じ `ルート結果` シート・同じ列順です。
+ルート計算は手元で済ませ、Apps Script は `latest_route_summary` と `latest_route_stops` を
+読むだけにします。
+使う関数は `importRouteFromSupabase` で、書き出し先は段階1と同じ `ルート結果` シートです。
+
+シートの上部に最新 run のメタ情報を出し、空行をはさんで従来と同じ列順の明細を出します。
+
+```text
+A列        B列
+ルート名    2026-02-01_午前便      ← run_label
+起点        東京駅                ← start_name
+起点住所    東京都千代田区丸の内1  ← start_address
+合計距離km  42.7                  ← total_distance_km
+作成日時    2026-02-01 09:12      ← created_at (スクリプトのタイムゾーンで整形)
+配送先件数  10                    ← stop_count
+(空行)
+配送順 | ID | 配送先名 | 住所 | 希望時間 | 作業分数 | 優先度 | 区間距離km | 累計距離km
+...
+```
+
+値が空の項目は `(未設定)` と表示します。段階1の `optimizeRoute` は従来どおり明細だけを書きます。
+
+書式はスクリプト側で毎回付け直します。メタ情報エリアと明細ヘッダーに背景色、明細ヘッダーは
+太字・中央揃えで固定 (`setFrozenRows`)、配送先名・住所・起点住所は折り返し、数値列は右寄せ、
+列幅は住所や時刻が潰れない固定値にしています。
 
 ### 1. Supabase側を準備する
 
@@ -331,7 +422,7 @@ Supabaseダッシュボードの `Project Settings > API` から、`Project URL`
 | メッセージ | 原因 |
 | --- | --- |
 | スクリプトプロパティに ... を設定してください | 上の2つが未登録 |
-| 読み取りに失敗しました (401/404) | anonキーが違う、またはビューへの `grant select ... to anon` 未実行 |
+| 読み取りに失敗しました (401/404) | anonキーが違う、またはビューへの `grant select ... to anon` 未実行。既存プロジェクトは `latest_route_summary` を追加するため `supabase/schema.sql` を再実行する |
 | 完了済みのルートがありません | `route_runs` に `status = 'completed'` の行がない |
 
 ## Google Sheets出力との接続方針
@@ -367,9 +458,10 @@ Salesforce CSV → src/import_destinations.py → delivery_destinations
 「Google SheetsでSupabaseの結果を見る (段階2)」を参照してください。
 段階1の `optimizeRoute` はそのまま残してあり、どちらも同じ `ルート結果` シートに書きます。
 
-読み取りには **anon キー** を使い、`supabase/schema.sql` で `latest_route_stops` ビューにだけ
-`grant select ... to anon` しています。テーブル本体は RLS と GRANT の両方で閉じているので、
-anon キーが漏れても見えるのは「直近の完了済みルート」だけです。
+読み取りには **anon キー** を使い、`supabase/schema.sql` で `latest_route_stops` /
+`latest_route_summary` ビューにだけ `grant select ... to anon` しています。
+テーブル本体は RLS と GRANT の両方で閉じているので、anon キーが漏れても
+見えるのは「直近の完了済みルート」だけです。
 
 anon キーも外に出したくない場合は、Supabase Edge Function を間に入れ、
 service_role をサーバ側に閉じ込めます。
@@ -379,7 +471,7 @@ Apps Script → Edge Function (共有シークレットで認証 / service_role�
              → route_runs / route_stops
 ```
 
-この場合は `latest_route_stops` への anon 向け grant をやめ、Apps Script には
+この場合は 2つのビューへの anon 向け grant をやめ、Apps Script には
 関数専用のシークレットだけを持たせます。書き戻し (段階3) をやるならこちら推奨です。
 
 ### 段階3: シートでの調整を戻す
@@ -391,7 +483,7 @@ Apps Script → Edge Function (共有シークレットで認証 / service_role�
 ### 決めておくこと
 
 - service_role キーは手元の管理スクリプト専用。Apps Script には置かない
-- Apps Script からは anon キーで `latest_route_stops` だけを読む。
+- Apps Script からは anon キーで `latest_route_stops` / `latest_route_summary` だけを読む。
   さらに閉じたい場合は Edge Function 経由にする
 - キーはコードに直書きせず、必ず スクリプトプロパティ (`SUPABASE_URL` / `SUPABASE_ANON_KEY`) に入れる
 - Supabaseに保存される `route_runs.status` は `completed` になって初めてビューに出る。
