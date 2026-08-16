@@ -10,3 +10,4 @@ data/*.csv
 data/*.json
 !data/sample_addresses.csv
 !data/sample_delivery_destinations.csv
+!data/demo_public_facilities_addresses.csv
