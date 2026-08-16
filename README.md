@@ -347,6 +347,22 @@ python3 src/save_route_to_supabase.py --source csv --dry-run
 
 `route_runs` に1行、`route_stops` に配送順が保存されます。既存の `output/optimized_route.csv` の出力はそのまま使えます。
 
+## Google Sheetsだけで配送ルートを作る (段階3)
+
+ターミナルを使わないスタッフ向けの経路です。詳しい手順は
+[docs/google_sheets_setup.md](docs/google_sheets_setup.md) の4章にあります。
+
+1. シート名 `配送先入力` を作り、配送先CSV (`id,name,address,priority`) を見出しごと貼り付ける
+2. 見出し行より上の `配送日` セル、または `delivery_date` 列に配送日 (`2026-08-15`) を入れる
+3. メニュー `配送ルート > 配送ルート作成 (配送先入力シートから)` を実行する
+4. `2026-08-15_配送ルート` タブが新しく作られ、配送順が出力される (同名タブがあれば `_2` から連番)
+
+`id` や `name` が空でも住所だけで動きます。住所は Google Geocoding API で座標化し、結果は
+`配送先入力` シートの `lat` / `lng` 列に書き戻すので、同じ住所は次回以降問い合わせません。
+API キーと会社センターの住所は Apps Script のスクリプトプロパティ
+(`GOOGLE_MAPS_API_KEY` と `ROUTE_ORIGIN_ADDRESS`、または `ROUTE_ORIGIN_LAT`/`ROUTE_ORIGIN_LNG`)
+に入れます。`Code.gs` には書きません。Supabase には保存しません。
+
 ## Google Sheetsで使う流れ (段階1: 今の形)
 
 この手順は既存の `apps-script/Code.gs` (シート内でルート計算する版) を使います。Supabaseは使いません。

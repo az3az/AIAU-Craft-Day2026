@@ -44,6 +44,7 @@ Supabase を使わずローカルCSVと Sheets だけで動かすことも可能
 | Supabase REST クライアント（certifi によるTLS） | `src/supabase_client.py` | #1, #3 |
 | Apps Script: 段階1のシート内ルート作成 | `apps-script/Code.gs` `optimizeRoute` | #1 |
 | Apps Script: 段階2のSupabase読み取り（anonキーのみ） | `apps-script/Code.gs` `importRouteFromSupabase` | #1 |
+| Apps Script: 段階3の Sheets 完結版（住所の座標化と日付タブ出力） | `apps-script/Code.gs` `createRouteFromInputSheet` | #12（レビュー待ち） |
 | ルート結果シート上部のメタ情報表示（`latest_route_summary`） | `apps-script/Code.gs`, `supabase/schema.sql` | #7 |
 | ルート結果シートの表示書式（行高・折り返し・列幅・背景色・ヘッダー固定） | `apps-script/Code.gs` | #8 |
 | Fly.io での単発バッチ実行 | `Dockerfile`, `fly.toml` | #3 |
@@ -90,6 +91,7 @@ src/
   save_route_to_supabase.py          ルート結果をSupabaseへ保存
 supabase/schema.sql                  テーブル・ビュー・RLS・grant
 apps-script/Code.gs                  Google Sheets 用スクリプト
+apps-script/tests/code_test.js       Code.gs の回帰確認（node で実行、外部通信なし）
 docs/feature_ideas.md                機能案
 docs/project_handover.md             この資料
 docs/google_sheets_setup.md          Google Sheets 側の設定手順
@@ -103,9 +105,10 @@ Dockerfile / fly.toml                Fly.io 用
 | `SUPABASE_URL` | ローカル / Fly / Apps Script | プロジェクトURL |
 | `SUPABASE_SERVICE_ROLE_KEY` | ローカル / Fly のみ | 書き込み。**Apps Script には置かない** |
 | `SUPABASE_ANON_KEY` | Apps Script のみ | 公開ビューの読み取り |
-| `GOOGLE_MAPS_API_KEY` | ローカル / Fly | Google Geocoding API |
+| `GOOGLE_MAPS_API_KEY` | ローカル / Fly / Apps Script | Google Geocoding API |
 | `GEOCODER` | ローカル / Fly | `google` または `nominatim`。未設定時は `GOOGLE_MAPS_API_KEY` があれば `google`、無ければ `nominatim`（開発確認専用）になる |
 | `ROUTE_ORIGIN` / `ROUTE_ORIGIN_ADDRESS` / `ROUTE_ORIGIN_LAT` / `ROUTE_ORIGIN_LNG` / `ROUTE_ORIGIN_NAME` | ローカル / Fly | 起点の指定 |
+| `ROUTE_ORIGIN_ADDRESS` / `ROUTE_ORIGIN_LAT` / `ROUTE_ORIGIN_LNG` / `ROUTE_ORIGIN_NAME` | Apps Script | 段階3の起点の指定（スクリプトプロパティ） |
 
 `.env` は `.gitignore` 済みです。鍵・実住所・顧客名はコミットしません。
 
@@ -261,37 +264,30 @@ fly machine run <イメージ> --command "python3 src/save_route_to_supabase.py 
   本番・デモでは Google Geocoding API を使ってください。
 - ルート計算は Haversine の直線距離ベースで、道路距離や渋滞は考慮していません。
 
-## 7. 次の優先タスク: Google Sheets 完結版
+## 7. Google Sheets 完結版（段階3）
 
 **目的**: ローカルPCやSupabaseを使わなくても、Google Workspace の中だけで配送順を作れる形にする。
-非エンジニアに配布しやすく、環境構築が不要になるため、実運用の入口として最優先です。
 
-現状は、住所からの座標取得とルート計算をローカルの Python が担っているため、
-Python を実行できる人がいないと使えません。ここを Apps Script 側に寄せます。
+実装済み（`apps-script/Code.gs` の `createRouteFromInputSheet`、手順は
+[google_sheets_setup.md](google_sheets_setup.md) の4章）:
 
-### やること
+- `配送先入力` シートの `id,name,address,priority`（日本語見出しも可）を読む。`id` / `name` が空でも動く。
+- 配送日は見出し行より上の `配送日` セルか `delivery_date` 列から取る。
+- `UrlFetchApp` で Google Geocoding API を呼び、座標を `配送先入力` シートの `lat` / `lng` に書き戻す
+  （同じ住所は再取得しない。1回の実行は80件までで、残件は実行後の通知に出す）。
+- 起点はスクリプトプロパティ（`ROUTE_ORIGIN_ADDRESS` または `ROUTE_ORIGIN_LAT`/`ROUTE_ORIGIN_LNG`、`ROUTE_ORIGIN_NAME`）。
+- APIキーは `GOOGLE_MAPS_API_KEY` をスクリプトプロパティに置く。コード・シート・リポジトリには書かない。
+- 出力は `YYYY-MM-DD_配送ルート` タブ。同名があれば上書きせず `_2` から連番。形式は段階2と同じ。
+- 段階1 / 段階2（`optimizeRoute` / `importRouteFromSupabase`）の動作は変えていない。
 
-1. **住所ジオコーディングを Apps Script に実装する**
-   - `UrlFetchApp` で Google Geocoding API を呼び、`配送先` シートの `address` 列から `lat` / `lng` を埋める
-   - APIキーはスクリプトプロパティ（例: `GOOGLE_MAPS_API_KEY`）で管理し、コードにもシートにも書かない
-   - 取得済みの座標はシート上に残し、同じ住所は再取得しない（`src/geocoder.py` のキャッシュ方針をシートで再現）
-   - 1回の実行時間上限（6分）に収めるため、未取得行だけを処理し、残件がある場合はその旨を表示する
-2. **メタ情報を段階1でも出す**
-   - 現状 `optimizeRoute` は明細だけを書き、メタ情報は Supabase 経由の段階2でしか出ない
-   - ルート名・起点・合計距離・作成日時・配送先件数をシート内計算で埋め、`writeRoute` に渡す
-3. **起点をシートまたはスクリプトプロパティで設定できるようにする**
-   - 現在は `optimizeRoute` 内に東京駅の座標が直書きされている
-   - 設定シート（例: `設定`）または スクリプトプロパティで起点名・住所を指定できるようにする
-4. **Supabase保存は任意にする**
-   - Sheets 完結版でも、必要なときだけ結果を Supabase に送れる導線を残す（送信は Edge Function など
-     anonキーで安全に呼べる経路を検討する。`service_role` は Apps Script に置かない）
+ロジックの回帰確認: `node apps-script/tests/code_test.js`（Google のサービスをスタブして、外部通信なしで実行）。
 
-### 完了条件
+未実装で残っていること:
 
-- Python を一度も実行せずに、住所だけを貼ったシートから `ルート結果` シートが作れる
-- APIキーがスクリプトプロパティにあり、コード・シート・リポジトリのどこにも鍵が無い
-- 既存の `importRouteFromSupabase`（段階2）の動作を壊していない
-- 明細の列順（配送順, ID, 配送先名, 住所, 希望時間, 作業分数, 優先度, 区間距離km, 累計距離km）を維持している
+- 実の Google Sheets と Google Geocoding API での実行確認（APIキー未共有のため未実施）。
+- 段階1（`optimizeRoute`）のメタ情報表示と起点設定。現在も東京駅固定のまま。
+- Sheets からの Supabase 保存（Edge Function など anon で安全に呼べる経路を検討。`service_role` は置かない）。
+- 日付一覧タブとテンプレート複製（7.1 参照）。
 
 ## 7.1 日付ごとのシートタブ作成要件
 
