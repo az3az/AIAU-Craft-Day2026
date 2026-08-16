@@ -124,7 +124,8 @@ docker run --rm aiau-craft-day2026 python3 src/route_optimizer.py
 | `delivery_destinations` | 配送先マスタ。CSVの `id` は `external_id` に入り、再取込みは upsert になる |
 | `route_runs` | ルート作成1回分。出発地点・合計距離・件数・状態を持つ |
 | `route_stops` | ルート結果の明細。`route_runs` に紐づく配送順1件が1行 |
-| `latest_route_stops` | 直近のルート結果を、シートの列順で読むためのビュー |
+| `latest_route_stops` | 直近のルート結果の明細を、シートの列順で読むためのビュー |
+| `latest_route_summary` | 同じルートのメタ情報 (ルート名・起点・合計距離・件数・作成日時) を1行だけ返すビュー |
 
 定義は `supabase/schema.sql` にあります。Supabase Studio の SQL Editor に貼り付けて実行してください。
 
@@ -133,14 +134,14 @@ docker run --rm aiau-craft-day2026 python3 src/route_optimizer.py
 | キー | 使う場所 | 見える範囲 |
 | --- | --- | --- |
 | service_role | 手元の管理スクリプト (`src/*.py`) だけ | 全テーブル (RLSをバイパス) |
-| anon | Apps Script / 読み取り側 | `latest_route_stops` ビューのみ |
+| anon | Apps Script / 読み取り側 | `latest_route_stops` / `latest_route_summary` ビューのみ |
 
 **service_role キーは Apps Script には置きません。** Apps Script のコードやスクリプトプロパティは
 そのスプレッドシートの編集権を持つ人が見られるため、全テーブルに書き込めるキーを置くのは危険です。
 
 テーブル本体は RLS を有効にした上で anon / authenticated のポリシーを一切作らず、
-GRANT も外しています。外に公開するのは `latest_route_stops` ビューだけで、
-このビューに `grant select ... to anon` しています。
+GRANT も外しています。外に公開するのは `latest_route_stops` と `latest_route_summary` の
+2つのビューだけで、このビューに `grant select ... to anon` しています。
 
 ### 依存パッケージ
 
@@ -224,8 +225,26 @@ python3 src/save_route_to_supabase.py --source csv --dry-run
 
 ## Google SheetsでSupabaseの結果を見る (段階2)
 
-ルート計算は手元で済ませ、Apps Script は `latest_route_stops` を読むだけにします。
-使う関数は `importRouteFromSupabase` で、書き出し先は段階1と同じ `ルート結果` シート・同じ列順です。
+ルート計算は手元で済ませ、Apps Script は `latest_route_summary` と `latest_route_stops` を
+読むだけにします。
+使う関数は `importRouteFromSupabase` で、書き出し先は段階1と同じ `ルート結果` シートです。
+
+シートの上部に最新 run のメタ情報を出し、空行をはさんで従来と同じ列順の明細を出します。
+
+```text
+A列        B列
+ルート名    2026-02-01_午前便      ← run_label
+起点        東京駅                ← start_name
+起点住所    東京都千代田区丸の内1  ← start_address
+合計距離km  42.7                  ← total_distance_km
+作成日時    2026-02-01 09:12      ← created_at (スクリプトのタイムゾーンで整形)
+配送先件数  10                    ← stop_count
+(空行)
+配送順 | ID | 配送先名 | 住所 | 希望時間 | 作業分数 | 優先度 | 区間距離km | 累計距離km
+...
+```
+
+値が空の項目は `(未設定)` と表示します。段階1の `optimizeRoute` は従来どおり明細だけを書きます。
 
 ### 1. Supabase側を準備する
 
@@ -263,7 +282,7 @@ Supabaseダッシュボードの `Project Settings > API` から、`Project URL`
 | メッセージ | 原因 |
 | --- | --- |
 | スクリプトプロパティに ... を設定してください | 上の2つが未登録 |
-| 読み取りに失敗しました (401/404) | anonキーが違う、またはビューへの `grant select ... to anon` 未実行 |
+| 読み取りに失敗しました (401/404) | anonキーが違う、またはビューへの `grant select ... to anon` 未実行。既存プロジェクトは `latest_route_summary` を追加するため `supabase/schema.sql` を再実行する |
 | 完了済みのルートがありません | `route_runs` に `status = 'completed'` の行がない |
 
 ## Google Sheets出力との接続方針
@@ -299,9 +318,10 @@ Salesforce CSV → src/import_destinations.py → delivery_destinations
 「Google SheetsでSupabaseの結果を見る (段階2)」を参照してください。
 段階1の `optimizeRoute` はそのまま残してあり、どちらも同じ `ルート結果` シートに書きます。
 
-読み取りには **anon キー** を使い、`supabase/schema.sql` で `latest_route_stops` ビューにだけ
-`grant select ... to anon` しています。テーブル本体は RLS と GRANT の両方で閉じているので、
-anon キーが漏れても見えるのは「直近の完了済みルート」だけです。
+読み取りには **anon キー** を使い、`supabase/schema.sql` で `latest_route_stops` /
+`latest_route_summary` ビューにだけ `grant select ... to anon` しています。
+テーブル本体は RLS と GRANT の両方で閉じているので、anon キーが漏れても
+見えるのは「直近の完了済みルート」だけです。
 
 anon キーも外に出したくない場合は、Supabase Edge Function を間に入れ、
 service_role をサーバ側に閉じ込めます。
@@ -311,7 +331,7 @@ Apps Script → Edge Function (共有シークレットで認証 / service_role�
              → route_runs / route_stops
 ```
 
-この場合は `latest_route_stops` への anon 向け grant をやめ、Apps Script には
+この場合は 2つのビューへの anon 向け grant をやめ、Apps Script には
 関数専用のシークレットだけを持たせます。書き戻し (段階3) をやるならこちら推奨です。
 
 ### 段階3: シートでの調整を戻す
@@ -323,7 +343,7 @@ Apps Script → Edge Function (共有シークレットで認証 / service_role�
 ### 決めておくこと
 
 - service_role キーは手元の管理スクリプト専用。Apps Script には置かない
-- Apps Script からは anon キーで `latest_route_stops` だけを読む。
+- Apps Script からは anon キーで `latest_route_stops` / `latest_route_summary` だけを読む。
   さらに閉じたい場合は Edge Function 経由にする
 - キーはコードに直書きせず、必ず スクリプトプロパティ (`SUPABASE_URL` / `SUPABASE_ANON_KEY`) に入れる
 - Supabaseに保存される `route_runs.status` は `completed` になって初めてビューに出る。
