@@ -104,7 +104,7 @@ Dockerfile / fly.toml                Fly.io 用
 | `SUPABASE_SERVICE_ROLE_KEY` | ローカル / Fly のみ | 書き込み。**Apps Script には置かない** |
 | `SUPABASE_ANON_KEY` | Apps Script のみ | 公開ビューの読み取り |
 | `GOOGLE_MAPS_API_KEY` | ローカル / Fly | Google Geocoding API |
-| `GEOCODER` | ローカル / Fly | `google`（既定）または `nominatim` |
+| `GEOCODER` | ローカル / Fly | `google` または `nominatim`。未設定時は `GOOGLE_MAPS_API_KEY` があれば `google`、無ければ `nominatim`（開発確認専用）になる |
 | `ROUTE_ORIGIN` / `ROUTE_ORIGIN_ADDRESS` / `ROUTE_ORIGIN_LAT` / `ROUTE_ORIGIN_LNG` / `ROUTE_ORIGIN_NAME` | ローカル / Fly | 起点の指定 |
 
 `.env` は `.gitignore` 済みです。鍵・実住所・顧客名はコミットしません。
