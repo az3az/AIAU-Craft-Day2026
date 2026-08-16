@@ -101,6 +101,7 @@ docs/google_sheets_setup.md          Google Sheets 側の設定手順（管理�
 docs/staff_manual.md                 スタッフ向けの操作マニュアル（段階3）
 docs/admin_setup.md                  管理者向けの初期セットアップ（キー・制限・費用）
 docs/input_template.md               配送先入力シートの列仕様
+docs/test_evidence_sheets_stage3.md  段階3の実シート動作確認記録
 Dockerfile / fly.toml                Fly.io 用
 ```
 
@@ -256,11 +257,12 @@ fly machine run <イメージ> --command "python3 src/save_route_to_supabase.py 
 - Python の TLS 証明書問題を `certifi` で解消（`ssl.create_default_context(cafile=certifi.where())`）
 - Docker ビルドとコンテナ内での `--dry-run` 実行、コンテナ内からのHTTPS接続
 - 住所CSV → ジオコーディング → 配送順 → 起点切替 → 保存内容の dry-run（CLI通し）
+- 段階3を実スプレッドシートで実行（匿名サンプル5件。運用担当が実施）
+  → [test_evidence_sheets_stage3.md](test_evidence_sheets_stage3.md)
 
 未検証:
 
 - Fly.io 上での実行（`FLY_API_TOKEN` が必要）
-- Google Geocoding API を使った実ジオコーディング（`GOOGLE_MAPS_API_KEY` が必要）
 - 大量件数（数百件以上）での実行時間とAPI費用
 - 複数人が同時に Sheets を操作した場合の挙動
 
@@ -291,7 +293,8 @@ fly machine run <イメージ> --command "python3 src/save_route_to_supabase.py 
 
 未実装で残っていること:
 
-- 実の Google Sheets と Google Geocoding API での実行確認（APIキー未共有のため未実施）。
+- 80件超・同日再実行・座標化失敗を含む場合の実 Sheets 確認（基本の5件は
+  [test_evidence_sheets_stage3.md](test_evidence_sheets_stage3.md) で確認済み）。
 - 段階1（`optimizeRoute`）のメタ情報表示と起点設定。現在も東京駅固定のまま。
 - Sheets からの Supabase 保存（Edge Function など anon で安全に呼べる経路を検討。`service_role` は置かない）。
 - 日付一覧タブとテンプレート複製（7.1 参照）。
