@@ -1,0 +1,265 @@
+# 引き継ぎドキュメント
+
+この配送ルート作成プロジェクトを、別の担当者・別のツールでも続けられるようにまとめた資料です。
+実データや鍵は一切書きません。環境変数名だけを書き、値は `.env` / Fly secrets / Apps Script の
+スクリプトプロパティで管理します。
+
+## 1. 何を作っているか
+
+配送先データから配送順を作り、配車担当者が Google Sheets で確認できるようにする仕組みです。
+
+```text
+配送先データ (住所CSV / スケジュールExcel)
+  ↓ Python: ジオコーディング・ルート計算
+Supabase (delivery_destinations / route_runs / route_stops)
+  ↓ Apps Script が anon キーで読み取り
+Google Sheets 「ルート結果」シート
+```
+
+役割分担は、Supabase が「データの正」、Google Sheets が「見る・直す場所」です。
+高権限の `service_role` はローカル管理スクリプトとバッチ実行にだけ使い、Sheets 側には置きません。
+
+## 2. main に入っている機能（すべてマージ済み）
+
+| 機能 | 実装 | 対応PR |
+| --- | --- | --- |
+| 配送順の作成（優先度→距離の貪欲法、Haversine距離） | `src/route_optimizer.py` | #1 |
+| Supabaseのテーブル・ビュー・RLS・grant | `supabase/schema.sql` | #1, #7 |
+| 配送先CSVのSupabase取込（upsert、文字コード指定、重複ID検出） | `src/import_destinations.py` | #1 |
+| ルート結果のSupabase保存（route_runs / route_stops） | `src/save_route_to_supabase.py` | #1 |
+| Supabase REST クライアント（certifi によるTLS） | `src/supabase_client.py` | #1, #3 |
+| Apps Script: 段階1のシート内ルート作成 | `apps-script/Code.gs` `optimizeRoute` | #1 |
+| Apps Script: 段階2のSupabase読み取り（anonキーのみ） | `apps-script/Code.gs` `importRouteFromSupabase` | #1 |
+| ルート結果シート上部のメタ情報表示（`latest_route_summary`） | `apps-script/Code.gs`, `supabase/schema.sql` | #7 |
+| ルート結果シートの表示書式（行高・折り返し・列幅・背景色・ヘッダー固定） | `apps-script/Code.gs` | #8 |
+| Fly.io での単発バッチ実行 | `Dockerfile`, `fly.toml` | #3 |
+| 住所だけのCSVのジオコーディング（キャッシュ・起点切替・異常系メッセージ） | `src/geocoder.py`, `src/geocode_destinations.py` | #5 |
+| スケジュールExcelから人が補正できる中間CSVを抽出 | `src/extract_tasks_from_excel.py` | #10 |
+| README の提出用サマリー | `README.md` | #9 |
+
+### マージ済みPR
+
+| PR | 内容 |
+| --- | --- |
+| #1 | Supabaseのテーブル設計、CSV取込、ルート結果保存、Apps Script連携 |
+| #3 | Fly.io でのバッチ実行と certifi によるTLS対応 |
+| #5 | 住所だけのCSVをジオコーディングしてルートを作る |
+| #7 | ルート結果シート上部に最新ルートのメタ情報を表示 |
+| #8 | ルート結果シートの表示書式を整える |
+| #9 | README に提出用サマリーを追加 |
+| #10 | スケジュールExcelからタスク候補CSVを抽出 |
+
+### 未マージ・クローズしたPR
+
+| PR | 内容 | 状態 |
+| --- | --- | --- |
+| #4 | Excel抽出の初版 | クローズ。#10 で作り直したため不要。ブランチ削除済み |
+| #6 | Excel抽出の再作成版 | クローズ。#10 で作り直したため不要。ブランチ削除済み |
+
+現在オープンな機能PRはありません（この引き継ぎドキュメントのPRを除く）。
+
+## 3. ファイル構成
+
+```text
+data/
+  sample_delivery_destinations.csv   緯度経度ありの配送先サンプル
+  sample_addresses.csv               住所だけのサンプル
+output/
+  optimized_route.csv                生成される配送順
+src/
+  route_optimizer.py                 配送順の作成（ローカル確認用）
+  geocoder.py                        住所→緯度経度（Google / Nominatim、JSONキャッシュ）
+  geocode_destinations.py            住所CSV → 配送先CSV
+  extract_tasks_from_excel.py        スケジュールExcel → 人が補正できる中間CSV
+  supabase_client.py                 Supabase REST の最小クライアント
+  import_destinations.py             配送先CSVをSupabaseへ取り込む
+  save_route_to_supabase.py          ルート結果をSupabaseへ保存
+supabase/schema.sql                  テーブル・ビュー・RLS・grant
+apps-script/Code.gs                  Google Sheets 用スクリプト
+docs/feature_ideas.md                機能案
+docs/project_handover.md             この資料
+Dockerfile / fly.toml                Fly.io 用
+```
+
+## 4. 使う環境変数（値はここに書かない）
+
+| 変数名 | 使う場所 | 用途 |
+| --- | --- | --- |
+| `SUPABASE_URL` | ローカル / Fly / Apps Script | プロジェクトURL |
+| `SUPABASE_SERVICE_ROLE_KEY` | ローカル / Fly のみ | 書き込み。**Apps Script には置かない** |
+| `SUPABASE_ANON_KEY` | Apps Script のみ | 公開ビューの読み取り |
+| `GOOGLE_MAPS_API_KEY` | ローカル / Fly | Google Geocoding API |
+| `GEOCODER` | ローカル / Fly | `google`（既定）または `nominatim` |
+| `ROUTE_ORIGIN` / `ROUTE_ORIGIN_ADDRESS` / `ROUTE_ORIGIN_LAT` / `ROUTE_ORIGIN_LNG` / `ROUTE_ORIGIN_NAME` | ローカル / Fly | 起点の指定 |
+
+`.env` は `.gitignore` 済みです。鍵・実住所・顧客名はコミットしません。
+
+## 5. 動作確認済みの手順（そのまま再現できます）
+
+### 5.1 準備
+
+```bash
+git clone https://github.com/az3az/AIAU-Craft-Day2026.git
+cd AIAU-Craft-Day2026
+pip install -r requirements.txt
+```
+
+### 5.2 ローカルだけで配送順を作る
+
+```bash
+python3 src/route_optimizer.py
+python3 src/route_optimizer.py --input data/sample_delivery_destinations.csv --origin tokyo_station
+```
+
+`output/optimized_route.csv` に `stop_no,id,name,address,time_window,service_minutes,priority,leg_distance_km,total_distance_km` が出力されます。
+
+### 5.3 住所だけのCSVからルートを作る
+
+```bash
+# 本番・デモは Google Geocoding API を使う
+export GOOGLE_MAPS_API_KEY=...    # .env / Fly secrets で管理。コードには書かない
+python3 src/geocode_destinations.py \
+  --input data/sample_addresses.csv \
+  --output data/geocoded_destinations.csv
+
+# キー無しで挙動だけ見る場合（開発確認専用）
+python3 src/geocode_destinations.py --provider nominatim --dry-run
+
+python3 src/route_optimizer.py --input data/geocoded_destinations.csv --origin tokyo_station
+```
+
+結果は `data/geocode_cache.json` にキャッシュされ、同じ住所は2回目以降APIを呼びません。
+キャッシュと変換結果は `.gitignore` 対象です。
+
+### 5.4 起点を切り替える
+
+```bash
+ROUTE_ORIGIN_ADDRESS="東京都江東区新木場1丁目" \
+  python3 src/route_optimizer.py --input data/geocoded_destinations.csv --origin center
+```
+
+`--origin` は `tokyo_station`（既定）、`center`（環境変数から取得）、任意の住所文字列を受け付けます。
+
+### 5.5 Supabase に取り込む・保存する
+
+```bash
+# 1. Supabase の SQL Editor で supabase/schema.sql を実行する
+# 2. .env に SUPABASE_URL と SUPABASE_SERVICE_ROLE_KEY を置く（ローカルのみ）
+python3 src/import_destinations.py --input data/geocoded_destinations.csv
+python3 src/save_route_to_supabase.py --source supabase --label 2026-02-01_午前便
+
+# 送信内容だけ確認する
+python3 src/save_route_to_supabase.py --source csv --input data/geocoded_destinations.csv --dry-run
+```
+
+文字コードが違うCSVは `--encoding cp932` のように指定します。
+
+### 5.6 Google Sheets で見る
+
+段階1（Supabaseなし）:
+
+1. スプレッドシートを作り、シート名を `配送先` にする
+2. `data/sample_delivery_destinations.csv` の中身を貼り付ける
+3. `拡張機能 > Apps Script` に `apps-script/Code.gs` を貼り付ける
+4. メニュー `配送ルート > シートからルート作成 (段階1)` を実行する
+
+段階2（Supabaseの結果を読む）:
+
+1. Apps Script の `プロジェクトの設定 > スクリプト プロパティ` に `SUPABASE_URL` と `SUPABASE_ANON_KEY` を登録する
+2. メニュー `配送ルート > Supabaseから取得 (段階2)` を実行する
+3. `ルート結果` シートの1〜6行目にメタ情報、8行目にヘッダー、9行目以降に明細が出る
+
+### 5.7 スケジュールExcelから中間CSVを作る
+
+```bash
+python3 src/extract_tasks_from_excel.py --input "<スケジュール>.xlsx" --output data/tasks.csv
+python3 src/extract_tasks_from_excel.py --input "<スケジュール>.xlsx" --sheet 815 --dry-run
+```
+
+出力は `date,task_type,customer,venue_name,address,start_time,end_time,required_vehicle,required_staff_count,assigned_vehicle,assigned_staff,origin,notes` です。
+`address` は空欄で出るので、人が補ってから 5.5 の流れに乗せます。
+
+### 5.8 Fly.io での単発バッチ実行
+
+```bash
+fly apps create <アプリ名>
+fly secrets set SUPABASE_URL=... SUPABASE_SERVICE_ROLE_KEY=...
+fly deploy --build-only --push
+fly machine run <イメージ> --command "python3 src/save_route_to_supabase.py --source supabase" --detach
+```
+
+## 6. 確認できていること / 未検証のこと
+
+確認済み:
+
+- ローカル → Supabase 取込・保存 → Google Sheets 表示の通し動作（プロジェクト所有者が実施）
+- Python の TLS 証明書問題を `certifi` で解消（`ssl.create_default_context(cafile=certifi.where())`）
+- Docker ビルドとコンテナ内での `--dry-run` 実行、コンテナ内からのHTTPS接続
+- 住所CSV → ジオコーディング → 配送順 → 起点切替 → 保存内容の dry-run（CLI通し）
+
+未検証:
+
+- Fly.io 上での実行（`FLY_API_TOKEN` が必要）
+- Google Geocoding API を使った実ジオコーディング（`GOOGLE_MAPS_API_KEY` が必要）
+- 大量件数（数百件以上）での実行時間とAPI費用
+- 複数人が同時に Sheets を操作した場合の挙動
+
+注意点:
+
+- Nominatim は存在しない住所文字列を別地点にマッチさせることがあるため、開発確認専用です。
+  本番・デモでは Google Geocoding API を使ってください。
+- ルート計算は Haversine の直線距離ベースで、道路距離や渋滞は考慮していません。
+
+## 7. 次の優先タスク: Google Sheets 完結版
+
+**目的**: ローカルPCやSupabaseを使わなくても、Google Workspace の中だけで配送順を作れる形にする。
+非エンジニアに配布しやすく、環境構築が不要になるため、実運用の入口として最優先です。
+
+現状は、住所からの座標取得とルート計算をローカルの Python が担っているため、
+Python を実行できる人がいないと使えません。ここを Apps Script 側に寄せます。
+
+### やること
+
+1. **住所ジオコーディングを Apps Script に実装する**
+   - `UrlFetchApp` で Google Geocoding API を呼び、`配送先` シートの `address` 列から `lat` / `lng` を埋める
+   - APIキーはスクリプトプロパティ（例: `GOOGLE_MAPS_API_KEY`）で管理し、コードにもシートにも書かない
+   - 取得済みの座標はシート上に残し、同じ住所は再取得しない（`src/geocoder.py` のキャッシュ方針をシートで再現）
+   - 1回の実行時間上限（6分）に収めるため、未取得行だけを処理し、残件がある場合はその旨を表示する
+2. **メタ情報を段階1でも出す**
+   - 現状 `optimizeRoute` は明細だけを書き、メタ情報は Supabase 経由の段階2でしか出ない
+   - ルート名・起点・合計距離・作成日時・配送先件数をシート内計算で埋め、`writeRoute` に渡す
+3. **起点をシートまたはスクリプトプロパティで設定できるようにする**
+   - 現在は `optimizeRoute` 内に東京駅の座標が直書きされている
+   - 設定シート（例: `設定`）または スクリプトプロパティで起点名・住所を指定できるようにする
+4. **Supabase保存は任意にする**
+   - Sheets 完結版でも、必要なときだけ結果を Supabase に送れる導線を残す（送信は Edge Function など
+     anonキーで安全に呼べる経路を検討する。`service_role` は Apps Script に置かない）
+
+### 完了条件
+
+- Python を一度も実行せずに、住所だけを貼ったシートから `ルート結果` シートが作れる
+- APIキーがスクリプトプロパティにあり、コード・シート・リポジトリのどこにも鍵が無い
+- 既存の `importRouteFromSupabase`（段階2）の動作を壊していない
+- 明細の列順（配送順, ID, 配送先名, 住所, 希望時間, 作業分数, 優先度, 区間距離km, 累計距離km）を維持している
+
+## 8. その後の開発候補
+
+| 候補 | 内容 | 想定規模 |
+| --- | --- | --- |
+| 起点プリセット | 実際の配送センターを `--origin center` の既定にする | 小 |
+| Fly.io 定期実行 | スケジュール実行で毎朝ルートを更新する | 小 |
+| 複数車両対応 | 車両ごとに配送先を分割し、車両別のルートを作る | 中 |
+| 配送時間帯制約 | `time_window` を守る順序付けに変える（現在は表示のみ） | 中 |
+| 道路距離・所要時間 | Haversine から Google Distance Matrix などへ | 中 |
+| Excel中間CSVの接続 | 抽出CSVの住所補完後に取込へ流す運用を固める | 中 |
+| スタッフ稼働連携 | 設営・撤去の人数や担当と突き合わせる | 大 |
+| 実績との差分比較 | 計画ルートと実配送結果を比較して改善する | 大 |
+
+## 9. 開発時の約束ごと
+
+- `main` に直接コミットしない。作業は新しいブランチで行い、PR はレビュー後にマージする。
+- 鍵・トークン・実顧客名・実会社データはコミットしない。サンプルは匿名化した値を使う。
+- `service_role` キーを Apps Script やフロント側に置かない。公開する読み取りは
+  `latest_route_stops` / `latest_route_summary` のビュー経由に限定する。
+- `supabase/schema.sql` を変更したら、既存プロジェクトでの再実行が必要なことを明記する。
+- 実行確認していない項目は「未検証」と書く。
