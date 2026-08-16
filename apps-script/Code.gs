@@ -172,11 +172,12 @@ function createRouteFromInputSheet() {
     );
   }
 
+  // 配送日が入力されていなければ今日の日付で進める。何を使ったか分かるようシートにも残す。
+  let deliveryDateNote = '';
+
   if (!parsed.deliveryDate) {
-    throw new Error(
-      '配送日が分かりません。「' + INPUT_SHEET_NAME + '」シートに「' + DELIVERY_DATE_LABEL
-      + '」と書いたセルとその右に日付を入れるか、delivery_date 列を作ってください (例: 2026-08-15)。'
-    );
+    parsed.deliveryDate = applyTodayAsDeliveryDate(inputSheet, parsed);
+    deliveryDateNote = ' 配送日が空だったので、今日 (' + parsed.deliveryDate + ') を配送日にしました。';
   }
 
   const apiKey = getGeocodingApiKey();
@@ -221,7 +222,37 @@ function createRouteFromInputSheet() {
   });
 
   spreadsheet.setActiveSheet(outputSheet);
-  spreadsheet.toast(resultMessage(sheetName, geocoded, usable.length), '配送ルート作成', 15);
+  spreadsheet.toast(
+    resultMessage(sheetName, geocoded, usable.length) + deliveryDateNote, '配送ルート作成', 15);
+}
+
+// 配送日が無いときの補完。今日の日付を返し、入力シートにも書き戻す。
+// 行を挿入した場合は、座標の書き戻し先がずれないよう parsed の行番号もずらす。
+function applyTodayAsDeliveryDate(sheet, parsed) {
+  const date = todayText();
+  const values = sheet.getDataRange().getValues();
+  const label = findDeliveryDateLabel(values, parsed.headerRowIndex);
+
+  if (label) {
+    sheet.getRange(label.row + 1, label.col + 2).setValue(date);
+    return date;
+  }
+
+  if (parsed.headerRowIndex > 0 && cellText(values[0], 0) === '' && cellText(values[0], 1) === '') {
+    sheet.getRange(1, 1).setValue(DELIVERY_DATE_LABEL);
+    sheet.getRange(1, 2).setValue(date);
+    return date;
+  }
+
+  sheet.insertRowsBefore(1, 1);
+  sheet.getRange(1, 1).setValue(DELIVERY_DATE_LABEL);
+  sheet.getRange(1, 2).setValue(date);
+  parsed.headerRowIndex += 1;
+  parsed.destinations.forEach(function(item) {
+    item.rowIndex += 1;
+  });
+
+  return date;
 }
 
 // 「配送先入力」シートを用意する。空なら配送日 (今日) と見出し付きのテンプレートを作り、
