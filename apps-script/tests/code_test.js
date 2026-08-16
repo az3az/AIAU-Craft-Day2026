@@ -28,8 +28,13 @@ function makeSheet(name, values) {
     data,
     written: [],
     getName: () => name,
-    getDataRange: () => ({ getValues: () => data.map(r => r.slice()) }),
-    getLastColumn: () => Math.max(...data.map(r => r.length)),
+    getDataRange: () => ({ getValues: () => data.map(r => (r || []).slice()) }),
+    getLastColumn: () => Math.max(...data.map(r => (r || []).length)),
+    insertRowsBefore(row, numRows) {
+      for (let i = 0; i < numRows; i++) {
+        data.splice(row - 1, 0, []);
+      }
+    },
     getRange(row, col, numRows, numCols) {
       return {
         setValue: v => { (data[row - 1] = data[row - 1] || [])[col - 1] = v; },
@@ -78,6 +83,10 @@ const sandbox = {
 let spreadsheet;
 vm.createContext(sandbox);
 vm.runInContext(source, sandbox);
+
+function today() {
+  return sandbox.Utilities.formatDate(new Date(), 'Asia/Tokyo', 'yyyy-MM-dd');
+}
 
 function run(name, fn) {
   try { fn(); console.log('PASS ' + name); }
@@ -272,14 +281,8 @@ run('createInputTemplateSheet: 空のテンプレートを作り、そのまま�
   assert.strictEqual(parsed.columns.lat, 4);
 });
 
-run('createInputTemplateSheet: 既存データがあるときは上書きしない', () => {
-  const input = makeSheet('配送先入力', [
-    ['配送日', '2026-08-15'],
-    [],
-    ['id', 'name', 'address', 'priority'],
-    ['D01', '公共施設A', '東京都江東区有明3-11-1', '1'],
-  ]);
-  const sheets = [input];
+run('createInputTemplateSheet: 空のときは B1 に今日の日付を入れる', () => {
+  const sheets = [];
   spreadsheet = {
     getSheetByName: (n) => sheets.find(s => s.getName() === n) || null,
     getSheets: () => sheets,
@@ -288,7 +291,87 @@ run('createInputTemplateSheet: 既存データがあるときは上書きしな�
     toast: () => {},
   };
 
-  assert.throws(() => sandbox.createInputTemplateSheet(), /既にデータがある/);
+  const template = sandbox.createInputTemplateSheet();
+  assert.strictEqual(template.data[0][1], today());
+  assert.strictEqual(sandbox.normalizeDate(template.data[0][1]), today());
+});
+
+function templateSpreadsheet(input) {
+  const sheets = [input];
+  spreadsheet = {
+    getSheetByName: (n) => sheets.find(s => s.getName() === n) || null,
+    getSheets: () => sheets,
+    insertSheet: (n) => { const s = makeSheet(n, []); sheets.push(s); return s; },
+    setActiveSheet: () => {},
+    toast: (msg) => { sheetValues.toast = msg; },
+  };
+  return sheets;
+}
+
+run('createInputTemplateSheet: 配送日も見出しも揃っていれば何も変えない', () => {
+  const input = makeSheet('配送先入力', [
+    ['配送日', '2026-08-15'],
+    [],
+    ['id', 'name', 'address', 'priority'],
+    ['D01', '公共施設A', '東京都江東区有明3-11-1', '1'],
+  ]);
+  const sheets = templateSpreadsheet(input);
+
+  sandbox.createInputTemplateSheet();
+  assert.strictEqual(input.data.length, 4);
+  assert.strictEqual(input.data[0][1], '2026-08-15');
   assert.strictEqual(input.data[3][2], '東京都江東区有明3-11-1');
   assert.strictEqual(sheets.length, 1);
+  assert.ok(/変えていません/.test(sheetValues.toast));
+});
+
+run('createInputTemplateSheet: 配送日セルが空なら今日の日付だけ補う', () => {
+  const input = makeSheet('配送先入力', [
+    ['配送日', ''],
+    [],
+    ['id', 'name', 'address', 'priority'],
+    ['D01', '公共施設A', '東京都江東区有明3-11-1', '1'],
+  ]);
+  templateSpreadsheet(input);
+
+  sandbox.createInputTemplateSheet();
+  assert.strictEqual(input.data[0][1], today());
+  assert.strictEqual(input.data.length, 4);
+  assert.strictEqual(input.data[3][2], '東京都江東区有明3-11-1');
+});
+
+run('createInputTemplateSheet: 配送日ラベルが無いときは行を足して既存行を残す', () => {
+  const input = makeSheet('配送先入力', [
+    ['id', 'name', 'address', 'priority'],
+    ['D01', '公共施設A', '東京都江東区有明3-11-1', '1'],
+  ]);
+  templateSpreadsheet(input);
+
+  sandbox.createInputTemplateSheet();
+  assert.strictEqual(input.data[0][0], '配送日');
+  assert.strictEqual(input.data[0][1], today());
+  assert.strictEqual(input.data[1].join(','), 'id,name,address,priority');
+  assert.strictEqual(input.data[2][2], '東京都江東区有明3-11-1');
+
+  const parsed = sandbox.parseInputSheet(Array.from(input.data, r => (r || []).slice()));
+  assert.strictEqual(parsed.deliveryDate, today());
+  assert.strictEqual(parsed.destinations.length, 1);
+});
+
+run('createInputTemplateSheet: 見出し行が無いときは見出しを補い、データを消さない', () => {
+  const input = makeSheet('配送先入力', [
+    ['D01', '公共施設A', '東京都江東区有明3-11-1', '1'],
+    ['D02', '公共施設B', '東京都渋谷区神南1-19-8', '2'],
+  ]);
+  templateSpreadsheet(input);
+
+  sandbox.createInputTemplateSheet();
+  assert.strictEqual(input.data[0][0], '配送日');
+  assert.strictEqual(input.data[1].join(','), 'id,name,address,priority,lat,lng');
+  assert.strictEqual(input.data[2][2], '東京都江東区有明3-11-1');
+  assert.strictEqual(input.data[3][2], '東京都渋谷区神南1-19-8');
+
+  const parsed = sandbox.parseInputSheet(Array.from(input.data, r => (r || []).slice()));
+  assert.strictEqual(parsed.deliveryDate, today());
+  assert.strictEqual(parsed.destinations.length, 2);
 });

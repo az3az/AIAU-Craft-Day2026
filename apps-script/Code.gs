@@ -224,36 +224,92 @@ function createRouteFromInputSheet() {
   spreadsheet.toast(resultMessage(sheetName, geocoded, usable.length), '配送ルート作成', 15);
 }
 
-// 空の「配送先入力」シートを見出し付きで用意する。
-// 既にデータが入っている場合は上書きせずに止める。
+// 「配送先入力」シートを用意する。空なら配送日 (今日) と見出し付きのテンプレートを作り、
+// 既にデータがある場合は中身を消さず、足りない配送日セルと見出し行だけを補う。
 function createInputTemplateSheet() {
   const spreadsheet = SpreadsheetApp.getActiveSpreadsheet();
   let sheet = spreadsheet.getSheetByName(INPUT_SHEET_NAME);
-
-  if (sheet && !isBlankSheet(sheet)) {
-    throw new Error(
-      '「' + INPUT_SHEET_NAME + '」シートに既にデータがあるため、テンプレートを作りませんでした。'
-      + ' 中身を消すか、シート名を変えてからもう一度実行してください。'
-    );
-  }
+  let message;
 
   if (!sheet) {
     sheet = spreadsheet.insertSheet(INPUT_SHEET_NAME);
   }
 
+  if (isBlankSheet(sheet)) {
+    writeInputTemplate(sheet);
+    message = '「' + INPUT_SHEET_NAME + '」を用意しました。B1 の配送日 ('
+      + todayText() + ') を必要なら書き換えて、'
+      + INPUT_TEMPLATE_HEADER_ROW + '行目の見出しの下に配送先を貼り付けてください。';
+  } else {
+    const added = completeInputTemplate(sheet);
+    message = added.length === 0
+      ? '「' + INPUT_SHEET_NAME + '」には配送日と見出しがそろっています。データは変えていません。'
+      : added.join('と') + 'を追加しました。既存のデータはそのままです。';
+  }
+
+  spreadsheet.setActiveSheet(sheet);
+  spreadsheet.toast(message, '配送先入力テンプレート', 15);
+
+  return sheet;
+}
+
+function writeInputTemplate(sheet) {
   sheet.getRange(1, 1).setValue(DELIVERY_DATE_LABEL);
-  sheet.getRange(1, 2).setValue('');
+  sheet.getRange(1, 2).setValue(todayText());
   sheet.getRange(INPUT_TEMPLATE_HEADER_ROW, 1, 1, INPUT_TEMPLATE_HEADERS.length)
     .setValues([INPUT_TEMPLATE_HEADERS]);
 
   formatInputTemplate(sheet);
-  spreadsheet.setActiveSheet(sheet);
-  spreadsheet.toast(
-    '「' + INPUT_SHEET_NAME + '」を用意しました。B1 に配送日 (例: 2026-08-15) を入れ、'
-    + INPUT_TEMPLATE_HEADER_ROW + '行目の見出しの下に配送先を貼り付けてください。',
-    '配送先入力テンプレート', 15);
+}
 
-  return sheet;
+// 既存の行を消さずに、不足している見出し行と配送日セルだけを足す。
+// 足したものの名前を配列で返す。
+function completeInputTemplate(sheet) {
+  const added = [];
+  let values = sheet.getDataRange().getValues();
+
+  if (findHeaderRowIndex(values) < 0) {
+    sheet.insertRowsBefore(1, 1);
+    sheet.getRange(1, 1, 1, INPUT_TEMPLATE_HEADERS.length).setValues([INPUT_TEMPLATE_HEADERS]);
+    added.push('見出し行');
+    values = sheet.getDataRange().getValues();
+  }
+
+  const headerRowIndex = findHeaderRowIndex(values);
+
+  if (findDeliveryDateCell(values, headerRowIndex)) {
+    return added;
+  }
+
+  const label = findDeliveryDateLabel(values, headerRowIndex);
+
+  if (label && cellText(values[label.row], label.col + 1) === '') {
+    sheet.getRange(label.row + 1, label.col + 2).setValue(todayText());
+    added.push('配送日');
+  } else if (!label) {
+    sheet.insertRowsBefore(1, 1);
+    sheet.getRange(1, 1).setValue(DELIVERY_DATE_LABEL);
+    sheet.getRange(1, 2).setValue(todayText());
+    added.push('配送日');
+  }
+
+  return added;
+}
+
+// 見出し行より上にある「配送日」ラベルの位置。日付が入っているかは見ない。
+function findDeliveryDateLabel(values, headerRowIndex) {
+  for (let row = 0; row < headerRowIndex; row++) {
+    for (let col = 0; col < values[row].length; col++) {
+      if (String(values[row][col]).trim() === DELIVERY_DATE_LABEL) {
+        return { row: row, col: col };
+      }
+    }
+  }
+  return null;
+}
+
+function todayText() {
+  return Utilities.formatDate(new Date(), Session.getScriptTimeZone(), 'yyyy-MM-dd');
 }
 
 function isBlankSheet(sheet) {
