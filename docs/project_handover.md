@@ -119,8 +119,9 @@ Dockerfile / fly.toml                Fly.io 用
   値は `.env`（`.gitignore` 済み）、Fly secrets、Apps Script のスクリプトプロパティにだけ置きます。
 - 実在の顧客名・スタッフ名・取引先名・実住所・伝票番号を、コード・サンプルCSV・README・PR説明・
   Issue に書くこと。サンプルは `◯◯様＠△△会場` のような匿名の値を使います。
-- 会社のスケジュールExcelやそこから作った中間CSVをコミットすること（`data/` の生成物と
-  `data/geocode_cache.json` は `.gitignore` 対象）。
+- 会社のスケジュールExcelやそこから作った中間CSVをコミットすること。`.gitignore` で `*.xlsx` / `*.xls` と
+  `data/` 配下の生成CSV・JSON を除外し、`data/sample_addresses.csv` と
+  `data/sample_delivery_destinations.csv` だけを追跡対象にしています。
 - 本番・デモで Nominatim を使うこと（存在しない住所を別地点にマッチさせるため、開発確認専用）。
 
 使ってよいもの:

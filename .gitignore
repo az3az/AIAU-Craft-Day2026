@@ -2,5 +2,11 @@
 __pycache__/
 *.pyc
 .env
-data/geocode_cache.json
-data/geocoded_destinations.csv
+*.xlsx
+*.xls
+
+# data/ の生成物は既定で追跡しない。サンプルだけ明示的に許可する。
+data/*.csv
+data/*.json
+!data/sample_addresses.csv
+!data/sample_delivery_destinations.csv
