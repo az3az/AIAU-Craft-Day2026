@@ -269,15 +269,16 @@ function completeInputTemplate(sheet) {
   let values = sheet.getDataRange().getValues();
 
   if (findHeaderRowIndex(values) < 0) {
-    sheet.insertRowsBefore(1, 1);
-    sheet.getRange(1, 1, 1, INPUT_TEMPLATE_HEADERS.length).setValues([INPUT_TEMPLATE_HEADERS]);
+    const insertRow = headerInsertRow(values);
+    sheet.insertRowsBefore(insertRow, 1);
+    sheet.getRange(insertRow, 1, 1, INPUT_TEMPLATE_HEADERS.length).setValues([INPUT_TEMPLATE_HEADERS]);
     added.push('見出し行');
     values = sheet.getDataRange().getValues();
   }
 
   const headerRowIndex = findHeaderRowIndex(values);
 
-  if (findDeliveryDateCell(values, headerRowIndex)) {
+  if (findDeliveryDateCell(values, headerRowIndex) || hasDeliveryDateColumn(values, headerRowIndex)) {
     return added;
   }
 
@@ -294,6 +295,44 @@ function completeInputTemplate(sheet) {
   }
 
   return added;
+}
+
+// 見出し行を差し込む行番号 (1始まり)。上部の「配送日」ラベルより下に入れる。
+function headerInsertRow(values) {
+  let insertIndex = 0;
+
+  for (let row = 0; row < values.length; row++) {
+    for (let col = 0; col < values[row].length; col++) {
+      if (String(values[row][col]).trim() === DELIVERY_DATE_LABEL) {
+        insertIndex = row + 1;
+      }
+    }
+  }
+
+  return insertIndex + 1;
+}
+
+// 見出し行に delivery_date 列があり、日付が入っているか。
+function hasDeliveryDateColumn(values, headerRowIndex) {
+  let column;
+
+  values[headerRowIndex].forEach(function(header, index) {
+    if (INPUT_HEADER_ALIASES[String(header).trim()] === 'delivery_date' && column === undefined) {
+      column = index;
+    }
+  });
+
+  if (column === undefined) {
+    return false;
+  }
+
+  for (let row = headerRowIndex + 1; row < values.length; row++) {
+    if (normalizeDate(cellValue(values[row], column))) {
+      return true;
+    }
+  }
+
+  return false;
 }
 
 // 見出し行より上にある「配送日」ラベルの位置。日付が入っているかは見ない。

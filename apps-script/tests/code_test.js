@@ -375,3 +375,34 @@ run('createInputTemplateSheet: 見出し行が無いときは見出しを補い�
   assert.strictEqual(parsed.deliveryDate, today());
   assert.strictEqual(parsed.destinations.length, 2);
 });
+
+run('createInputTemplateSheet: 見出しを足すとき既存の配送日セルを残す', () => {
+  const input = makeSheet('配送先入力', [
+    ['配送日', '2026-08-15'],
+    ['D01', '公共施設A', '東京都江東区有明3-11-1', '1'],
+  ]);
+  templateSpreadsheet(input);
+
+  sandbox.createInputTemplateSheet();
+  assert.strictEqual(input.data[0][1], '2026-08-15');
+  assert.strictEqual(input.data[1].join(','), 'id,name,address,priority,lat,lng');
+  assert.strictEqual(input.data[2][2], '東京都江東区有明3-11-1');
+
+  const parsed = sandbox.parseInputSheet(Array.from(input.data, r => (r || []).slice()));
+  assert.strictEqual(parsed.deliveryDate, '2026-08-15');
+});
+
+run('createInputTemplateSheet: delivery_date 列で指定していれば配送日セルを足さない', () => {
+  const input = makeSheet('配送先入力', [
+    ['id', 'name', 'address', 'priority', 'delivery_date'],
+    ['D01', '公共施設A', '東京都江東区有明3-11-1', '1', '2026-08-15'],
+  ]);
+  templateSpreadsheet(input);
+
+  sandbox.createInputTemplateSheet();
+  assert.strictEqual(input.data.length, 2);
+  assert.strictEqual(input.data[0][0], 'id');
+
+  const parsed = sandbox.parseInputSheet(Array.from(input.data, r => (r || []).slice()));
+  assert.strictEqual(parsed.deliveryDate, '2026-08-15');
+});
