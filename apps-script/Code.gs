@@ -12,6 +12,25 @@ const ROUTE_HEADERS = [
   '累計距離km',
 ];
 
+// 明細列の書式。ROUTE_HEADERS と同じ並び。
+// wrap = 折り返し表示にする列 (住所や名称が潰れないように)。
+const ROUTE_COLUMN_FORMATS = [
+  { width: 60, align: 'right', wrap: false },   // 配送順
+  { width: 120, align: 'left', wrap: false },   // ID
+  { width: 200, align: 'left', wrap: true },    // 配送先名
+  { width: 320, align: 'left', wrap: true },    // 住所
+  { width: 100, align: 'center', wrap: false }, // 希望時間
+  { width: 80, align: 'right', wrap: false },   // 作業分数
+  { width: 70, align: 'right', wrap: false },   // 優先度
+  { width: 100, align: 'right', wrap: false },  // 区間距離km
+  { width: 100, align: 'right', wrap: false },  // 累計距離km
+];
+
+const META_BACKGROUND = '#eef3fb';
+const HEADER_BACKGROUND = '#d9e2f3';
+const META_ROW_HEIGHT = 26;
+const DETAIL_ROW_HEIGHT = 30;
+
 // ルート結果シート上部に出すメタ情報の行。[見出し, latest_route_summary のキー]
 const SUMMARY_ROWS = [
   ['ルート名', 'run_label'],
@@ -220,6 +239,7 @@ function writeRoute(spreadsheet, route, summary) {
   }
 
   outputSheet.clear();
+  outputSheet.setFrozenRows(0);
 
   let headerRow = 1;
 
@@ -228,21 +248,53 @@ function writeRoute(spreadsheet, route, summary) {
       return [entry[0], formatSummaryValue(entry[1], summary[entry[1]])];
     });
 
-    outputSheet.getRange(1, 1, metaValues.length, 2).setValues(metaValues);
+    const metaRange = outputSheet.getRange(1, 1, metaValues.length, 2);
+    metaRange.setValues(metaValues);
+    metaRange.setBackground(META_BACKGROUND);
+    metaRange.setVerticalAlignment('middle');
     outputSheet.getRange(1, 1, metaValues.length, 1).setFontWeight('bold');
+    // 起点住所などが長くても読めるように、値側だけ折り返す。
+    outputSheet.getRange(1, 2, metaValues.length, 1).setWrap(true);
+    outputSheet.setRowHeights(1, metaValues.length, META_ROW_HEIGHT);
+
     headerRow = metaValues.length + 2;  // メタ情報の下に空行を1行はさむ
   }
 
-  outputSheet.getRange(headerRow, 1, 1, ROUTE_HEADERS.length).setValues([ROUTE_HEADERS]);
-  outputSheet.getRange(headerRow, 1, 1, ROUTE_HEADERS.length).setFontWeight('bold');
+  const headerRange = outputSheet.getRange(headerRow, 1, 1, ROUTE_HEADERS.length);
+  headerRange.setValues([ROUTE_HEADERS]);
+  headerRange.setFontWeight('bold');
+  headerRange.setBackground(HEADER_BACKGROUND);
+  headerRange.setHorizontalAlignment('center');
+  headerRange.setVerticalAlignment('middle');
+  headerRange.setWrap(true);
+  outputSheet.setRowHeight(headerRow, DETAIL_ROW_HEIGHT);
 
   if (route.length > 0) {
     outputSheet
       .getRange(headerRow + 1, 1, route.length, ROUTE_HEADERS.length)
       .setValues(route);
+    outputSheet.setRowHeights(headerRow + 1, route.length, DETAIL_ROW_HEIGHT);
+    applyDetailColumnFormats(outputSheet, headerRow + 1, route.length);
   }
 
-  outputSheet.autoResizeColumns(1, ROUTE_HEADERS.length);
+  // 明細をスクロールしてもヘッダーが見えるようにする。
+  outputSheet.setFrozenRows(headerRow);
+  applyColumnWidths(outputSheet);
+}
+
+function applyColumnWidths(sheet) {
+  ROUTE_COLUMN_FORMATS.forEach(function(format, index) {
+    sheet.setColumnWidth(index + 1, format.width);
+  });
+}
+
+function applyDetailColumnFormats(sheet, firstRow, rowCount) {
+  ROUTE_COLUMN_FORMATS.forEach(function(format, index) {
+    const range = sheet.getRange(firstRow, index + 1, rowCount, 1);
+    range.setHorizontalAlignment(format.align);
+    range.setVerticalAlignment('middle');
+    range.setWrap(format.wrap);
+  });
 }
 
 function formatSummaryValue(key, value) {
