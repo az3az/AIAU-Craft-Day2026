@@ -19,7 +19,8 @@ Google Sheets 「ルート結果」シート
 役割分担は、Supabase が「データの正」、Google Sheets が「見る・直す場所」です。
 高権限の `service_role` はローカル管理スクリプトとバッチ実行にだけ使い、Sheets 側には置きません。
 
-Google Sheets の具体的な設定手順は [google_sheets_setup.md](google_sheets_setup.md) にまとめています。
+Google Sheets の具体的な設定手順は [google_sheets_setup.md](google_sheets_setup.md)、
+スタッフ向けの操作手順は [staff_manual.md](staff_manual.md) にまとめています。
 
 ### Supabase の役割
 
@@ -95,7 +96,8 @@ apps-script/Code.gs                  Google Sheets 用スクリプト
 apps-script/tests/code_test.js       Code.gs の回帰確認（node で実行、外部通信なし）
 docs/feature_ideas.md                機能案
 docs/project_handover.md             この資料
-docs/google_sheets_setup.md          Google Sheets 側の設定手順
+docs/google_sheets_setup.md          Google Sheets 側の設定手順（管理者向け）
+docs/staff_manual.md                 スタッフ向けの操作マニュアル（段階3）
 Dockerfile / fly.toml                Fly.io 用
 ```
 

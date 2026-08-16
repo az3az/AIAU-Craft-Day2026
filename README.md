@@ -349,7 +349,8 @@ python3 src/save_route_to_supabase.py --source csv --dry-run
 
 ## Google Sheetsだけで配送ルートを作る (段階3)
 
-ターミナルを使わないスタッフ向けの経路です。詳しい手順は
+ターミナルを使わないスタッフ向けの経路です。操作手順は
+[docs/staff_manual.md](docs/staff_manual.md)、管理者向けの設定は
 [docs/google_sheets_setup.md](docs/google_sheets_setup.md) の4章にあります。
 
 1. シート名 `配送先入力` を作り、配送先CSV (`id,name,address,priority`) を見出しごと貼り付ける
