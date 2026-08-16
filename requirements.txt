@@ -1,2 +1,4 @@
 # CA証明書束。SSL_CERT_FILE を手で指定しなくてもSupabaseに接続できるようにする。
 certifi>=2024.8.30
+# スケジュールExcel (.xlsx) から中間CSVを抽出する src/extract_tasks_from_excel.py 用。
+openpyxl>=3.1.5
