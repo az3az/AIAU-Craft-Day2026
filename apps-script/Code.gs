@@ -56,6 +56,11 @@ const INPUT_HEADER_ALIASES = {
   '配送日': 'delivery_date',
 };
 
+// 「配送先入力テンプレートを作成」で作る見出し。docs/input_template.md と揃える。
+const INPUT_TEMPLATE_HEADERS = ['id', 'name', 'address', 'priority', 'lat', 'lng'];
+const INPUT_TEMPLATE_HEADER_ROW = 3;
+const INPUT_TEMPLATE_COLUMN_WIDTHS = [120, 200, 320, 70, 110, 110];
+
 // 1回の実行は6分で打ち切られるので、ジオコーディング件数に上限を置く。
 const GEOCODE_LIMIT_PER_RUN = 80;
 const GEOCODE_ENDPOINT = 'https://maps.googleapis.com/maps/api/geocode/json';
@@ -79,6 +84,7 @@ function onOpen() {
   SpreadsheetApp.getUi()
     .createMenu('配送ルート')
     .addItem('配送ルート作成 (配送先入力シートから)', 'createRouteFromInputSheet')
+    .addItem('配送先入力テンプレートを作成', 'createInputTemplateSheet')
     .addItem('シートからルート作成 (段階1)', 'optimizeRoute')
     .addItem('Supabaseから取得 (段階2)', 'importRouteFromSupabase')
     .addToUi();
@@ -216,6 +222,63 @@ function createRouteFromInputSheet() {
 
   spreadsheet.setActiveSheet(outputSheet);
   spreadsheet.toast(resultMessage(sheetName, geocoded, usable.length), '配送ルート作成', 15);
+}
+
+// 空の「配送先入力」シートを見出し付きで用意する。
+// 既にデータが入っている場合は上書きせずに止める。
+function createInputTemplateSheet() {
+  const spreadsheet = SpreadsheetApp.getActiveSpreadsheet();
+  let sheet = spreadsheet.getSheetByName(INPUT_SHEET_NAME);
+
+  if (sheet && !isBlankSheet(sheet)) {
+    throw new Error(
+      '「' + INPUT_SHEET_NAME + '」シートに既にデータがあるため、テンプレートを作りませんでした。'
+      + ' 中身を消すか、シート名を変えてからもう一度実行してください。'
+    );
+  }
+
+  if (!sheet) {
+    sheet = spreadsheet.insertSheet(INPUT_SHEET_NAME);
+  }
+
+  sheet.getRange(1, 1).setValue(DELIVERY_DATE_LABEL);
+  sheet.getRange(1, 2).setValue('');
+  sheet.getRange(INPUT_TEMPLATE_HEADER_ROW, 1, 1, INPUT_TEMPLATE_HEADERS.length)
+    .setValues([INPUT_TEMPLATE_HEADERS]);
+
+  formatInputTemplate(sheet);
+  spreadsheet.setActiveSheet(sheet);
+  spreadsheet.toast(
+    '「' + INPUT_SHEET_NAME + '」を用意しました。B1 に配送日 (例: 2026-08-15) を入れ、'
+    + INPUT_TEMPLATE_HEADER_ROW + '行目の見出しの下に配送先を貼り付けてください。',
+    '配送先入力テンプレート', 15);
+
+  return sheet;
+}
+
+function isBlankSheet(sheet) {
+  return sheet.getDataRange().getValues().every(function(row) {
+    return row.every(function(cell) {
+      return cell === '' || cell === null || cell === undefined;
+    });
+  });
+}
+
+function formatInputTemplate(sheet) {
+  const headerRange = sheet.getRange(INPUT_TEMPLATE_HEADER_ROW, 1, 1, INPUT_TEMPLATE_HEADERS.length);
+  headerRange.setFontWeight('bold');
+  headerRange.setBackground(HEADER_BACKGROUND);
+  headerRange.setHorizontalAlignment('center');
+
+  const labelRange = sheet.getRange(1, 1, 1, 2);
+  labelRange.setBackground(META_BACKGROUND);
+  sheet.getRange(1, 1).setFontWeight('bold');
+
+  INPUT_TEMPLATE_COLUMN_WIDTHS.forEach(function(width, index) {
+    sheet.setColumnWidth(index + 1, width);
+  });
+
+  sheet.setFrozenRows(INPUT_TEMPLATE_HEADER_ROW);
 }
 
 function resultMessage(sheetName, geocoded, stopCount) {
