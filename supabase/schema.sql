@@ -148,11 +148,37 @@ where r.id = (
 order by s.stop_no;
 
 -- ---------------------------------------------------------------------------
+-- ルート結果シートの上部に出すメタ情報 (最新の1件だけ)
+--   latest_route_stops と同じ条件で最新 run を選ぶ。読み取りは別クエリになるため、
+--   Apps Script 側で route_run_id が一致することを確認している。
+-- ---------------------------------------------------------------------------
+create or replace view public.latest_route_summary as
+select
+  r.id as route_run_id,
+  r.run_label,
+  r.delivery_date,
+  r.start_name,
+  r.start_address,
+  r.total_distance_km,
+  r.stop_count,
+  r.status,
+  r.created_at
+from public.route_runs r
+where r.id = (
+  select id
+  from public.route_runs
+  where status in ('completed', 'exported')
+  order by created_at desc, id desc
+  limit 1
+);
+
+-- ---------------------------------------------------------------------------
 -- RLS / 権限
 --   方針:
 --     * service_role キーはローカルの管理スクリプト (src/*.py) 専用。
 --       Apps Script には置かない。
---     * Apps Script は anon キーで latest_route_stops ビューだけを読む。
+--     * Apps Script は anon キーで latest_route_stops / latest_route_summary
+--       ビューだけを読む。
 --     * テーブル本体は anon / authenticated からは一切読めないままにする。
 -- ---------------------------------------------------------------------------
 alter table public.delivery_destinations enable row level security;
@@ -171,6 +197,7 @@ revoke all on public.route_stops from anon, authenticated;
 -- (PostgreSQL 15+ で security_invoker = true にした場合は、別途 route_runs /
 --  route_stops に anon 向け SELECT ポリシーが必要になるので注意)
 grant select on public.latest_route_stops to anon, authenticated;
+grant select on public.latest_route_summary to anon, authenticated;
 
 -- anon キーも外に出したくない場合は、この grant をやめて
 -- Edge Function (service_role をサーバ側に閉じ込める) 経由にする。README参照。

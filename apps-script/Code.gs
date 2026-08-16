@@ -12,6 +12,16 @@ const ROUTE_HEADERS = [
   '累計距離km',
 ];
 
+// ルート結果シート上部に出すメタ情報の行。[見出し, latest_route_summary のキー]
+const SUMMARY_ROWS = [
+  ['ルート名', 'run_label'],
+  ['起点', 'start_name'],
+  ['起点住所', 'start_address'],
+  ['合計距離km', 'total_distance_km'],
+  ['作成日時', 'created_at'],
+  ['配送先件数', 'stop_count'],
+];
+
 function onOpen() {
   SpreadsheetApp.getUi()
     .createMenu('配送ルート')
@@ -43,15 +53,18 @@ function optimizeRoute() {
   };
 
   const route = buildRoute(startPoint, destinations);
-  writeRoute(spreadsheet, route);
+  writeRoute(spreadsheet, route, null);
 }
 
-// 段階2: Supabaseの latest_route_stops ビューを読んで、ルート結果シートに書く。
+// 段階2: Supabaseの latest_route_summary / latest_route_stops ビューを読んで、
+// ルート結果シートに「上部=メタ情報 / 下部=明細」の形で書く。
 // ルート計算は手元の src/save_route_to_supabase.py 側で済ませておく。
 // キーは anon キーを使う (service_role はここには置かない)。
 function importRouteFromSupabase() {
   const config = getSupabaseConfig();
-  const stops = fetchLatestRouteStops(config);
+  const latest = fetchLatestRoute(config);
+  const summary = latest.summary;
+  const stops = latest.stops;
 
   if (stops.length === 0) {
     throw new Error(
@@ -74,7 +87,7 @@ function importRouteFromSupabase() {
     ];
   });
 
-  writeRoute(SpreadsheetApp.getActiveSpreadsheet(), route);
+  writeRoute(SpreadsheetApp.getActiveSpreadsheet(), route, summary);
 }
 
 function getSupabaseConfig() {
@@ -91,9 +104,41 @@ function getSupabaseConfig() {
   return { url: url.replace(/\/+$/, ''), anonKey: anonKey };
 }
 
+// メタ情報と明細は別リクエストなので、その間に新しい run が保存されると
+// 食い違うことがある。route_run_id が揃うまで数回だけ読み直す。
+function fetchLatestRoute(config) {
+  let summary = null;
+  let stops = [];
+
+  for (let attempt = 0; attempt < 3; attempt++) {
+    summary = fetchLatestRouteSummary(config);
+    stops = fetchLatestRouteStops(config);
+
+    if (!summary || stops.length === 0) {
+      return { summary: summary, stops: stops };
+    }
+
+    if (stops[0].route_run_id === summary.route_run_id) {
+      return { summary: summary, stops: stops };
+    }
+  }
+
+  // 揃わないときはメタ情報を捨て、明細だけを確実に表示する。
+  return { summary: null, stops: stops };
+}
+
 function fetchLatestRouteStops(config) {
-  const endpoint = config.url + '/rest/v1/latest_route_stops?select=*&order=stop_no.asc';
-  const response = UrlFetchApp.fetch(endpoint, {
+  return fetchView(config, 'latest_route_stops?select=*&order=stop_no.asc');
+}
+
+// 明細と同じ run のメタ情報。1行しか無いビューなので先頭を返す。
+function fetchLatestRouteSummary(config) {
+  const rows = fetchView(config, 'latest_route_summary?select=*&limit=1');
+  return rows.length > 0 ? rows[0] : null;
+}
+
+function fetchView(config, path) {
+  const response = UrlFetchApp.fetch(config.url + '/rest/v1/' + path, {
     method: 'get',
     muteHttpExceptions: true,
     headers: {
@@ -165,7 +210,9 @@ function buildRoute(startPoint, destinations) {
   return route;
 }
 
-function writeRoute(spreadsheet, route) {
+// summary があれば上部にメタ情報を出し、空行をはさんで明細を出す。
+// 段階1 (optimizeRoute) は summary = null で呼ぶので従来どおり明細だけ。
+function writeRoute(spreadsheet, route, summary) {
   let outputSheet = spreadsheet.getSheetByName(ROUTE_SHEET_NAME);
 
   if (!outputSheet) {
@@ -173,13 +220,49 @@ function writeRoute(spreadsheet, route) {
   }
 
   outputSheet.clear();
-  outputSheet.getRange(1, 1, 1, ROUTE_HEADERS.length).setValues([ROUTE_HEADERS]);
+
+  let headerRow = 1;
+
+  if (summary) {
+    const metaValues = SUMMARY_ROWS.map(function(entry) {
+      return [entry[0], formatSummaryValue(entry[1], summary[entry[1]])];
+    });
+
+    outputSheet.getRange(1, 1, metaValues.length, 2).setValues(metaValues);
+    outputSheet.getRange(1, 1, metaValues.length, 1).setFontWeight('bold');
+    headerRow = metaValues.length + 2;  // メタ情報の下に空行を1行はさむ
+  }
+
+  outputSheet.getRange(headerRow, 1, 1, ROUTE_HEADERS.length).setValues([ROUTE_HEADERS]);
+  outputSheet.getRange(headerRow, 1, 1, ROUTE_HEADERS.length).setFontWeight('bold');
 
   if (route.length > 0) {
-    outputSheet.getRange(2, 1, route.length, ROUTE_HEADERS.length).setValues(route);
+    outputSheet
+      .getRange(headerRow + 1, 1, route.length, ROUTE_HEADERS.length)
+      .setValues(route);
   }
 
   outputSheet.autoResizeColumns(1, ROUTE_HEADERS.length);
+}
+
+function formatSummaryValue(key, value) {
+  if (value === null || value === undefined || value === '') {
+    return '(未設定)';
+  }
+
+  if (key === 'total_distance_km' || key === 'stop_count') {
+    return Number(value);
+  }
+
+  if (key === 'created_at') {
+    return Utilities.formatDate(
+      new Date(value),
+      Session.getScriptTimeZone(),
+      'yyyy-MM-dd HH:mm'
+    );
+  }
+
+  return value;
 }
 
 function distanceKm(a, b) {
