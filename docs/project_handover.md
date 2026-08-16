@@ -100,6 +100,7 @@ docs/project_handover.md             この資料
 docs/google_sheets_setup.md          Google Sheets 側の設定手順（管理者向け）
 docs/staff_manual.md                 スタッフ向けの操作マニュアル（段階3）
 docs/admin_setup.md                  管理者向けの初期セットアップ（キー・制限・費用）
+docs/input_template.md               配送先入力シートの列仕様
 Dockerfile / fly.toml                Fly.io 用
 ```
 

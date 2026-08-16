@@ -81,7 +81,7 @@ vm.runInContext(source, sandbox);
 
 function run(name, fn) {
   try { fn(); console.log('PASS ' + name); }
-  catch (e) { console.log('FAIL ' + name + ': ' + e.message); process.exitCode = 1; }
+  catch (e) { console.log("FAIL " + name + ": " + (process.env.DEBUG ? e.stack : e.message)); process.exitCode = 1; }
 }
 
 run('normalizeDate: 複数表記を YYYY-MM-DD に揃える', () => {
@@ -246,4 +246,49 @@ run('createRouteFromInputSheet: 配送日が無いと分かるエラー', () => 
 run('createRouteFromInputSheet: 入力シートが無いと分かるエラー', () => {
   spreadsheet = { getSheetByName: () => null, getSheets: () => [] };
   assert.throws(() => sandbox.createRouteFromInputSheet(), /配送先入力.*見つかりません/);
+});
+
+run('createInputTemplateSheet: 空のテンプレートを作り、そのままルート作成に使える', () => {
+  const sheets = [];
+  spreadsheet = {
+    getSheetByName: (n) => sheets.find(s => s.getName() === n) || null,
+    getSheets: () => sheets,
+    insertSheet: (n) => { const s = makeSheet(n, []); sheets.push(s); return s; },
+    setActiveSheet: () => {},
+    toast: (msg) => { sheetValues.toast = msg; },
+  };
+
+  const template = sandbox.createInputTemplateSheet();
+  assert.strictEqual(template.getName(), '配送先入力');
+  assert.strictEqual(template.data[0][0], '配送日');
+  assert.strictEqual(template.data[2].join(','), 'id,name,address,priority,lat,lng');
+
+  // 見出しの位置は parseInputSheet が読める形になっている
+  template.data[0][1] = '2026-08-15';
+  template.data[3] = ['', '', '東京都江東区有明3-11-1', '1'];
+  const parsed = sandbox.parseInputSheet(Array.from(template.data, r => (r || []).slice()));
+  assert.strictEqual(parsed.deliveryDate, '2026-08-15');
+  assert.strictEqual(parsed.destinations.length, 1);
+  assert.strictEqual(parsed.columns.lat, 4);
+});
+
+run('createInputTemplateSheet: 既存データがあるときは上書きしない', () => {
+  const input = makeSheet('配送先入力', [
+    ['配送日', '2026-08-15'],
+    [],
+    ['id', 'name', 'address', 'priority'],
+    ['D01', '公共施設A', '東京都江東区有明3-11-1', '1'],
+  ]);
+  const sheets = [input];
+  spreadsheet = {
+    getSheetByName: (n) => sheets.find(s => s.getName() === n) || null,
+    getSheets: () => sheets,
+    insertSheet: (n) => { const s = makeSheet(n, []); sheets.push(s); return s; },
+    setActiveSheet: () => {},
+    toast: () => {},
+  };
+
+  assert.throws(() => sandbox.createInputTemplateSheet(), /既にデータがある/);
+  assert.strictEqual(input.data[3][2], '東京都江東区有明3-11-1');
+  assert.strictEqual(sheets.length, 1);
 });
