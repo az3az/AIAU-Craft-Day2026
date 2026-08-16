@@ -80,6 +80,14 @@ def load_records(input_file, source, encoding=DEFAULT_ENCODING, allow_duplicate_
     try:
         with Path(input_file).open(newline="", encoding=encoding) as file:
             rows = list(csv.DictReader(file))
+    except FileNotFoundError as error:
+        raise ValueError(
+            f"配送先CSVが見つかりません: {input_file} (--input のパスを確認してください)"
+        ) from error
+    except IsADirectoryError as error:
+        raise ValueError(
+            f"{input_file} はディレクトリです。CSVファイルを指定してください。"
+        ) from error
     except UnicodeDecodeError as error:
         raise ValueError(
             f"{input_file} を {encoding} で読めませんでした。"
@@ -182,4 +190,7 @@ def main():
 
 
 if __name__ == "__main__":
-    main()
+    try:
+        main()
+    except ValueError as error:
+        raise SystemExit(str(error)) from error

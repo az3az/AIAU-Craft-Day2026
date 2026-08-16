@@ -2,3 +2,5 @@
 __pycache__/
 *.pyc
 .env
+data/geocode_cache.json
+data/geocoded_destinations.csv
