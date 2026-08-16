@@ -102,6 +102,7 @@ docs/staff_manual.md                 スタッフ向けの操作マニュアル�
 docs/admin_setup.md                  管理者向けの初期セットアップ（キー・制限・費用）
 docs/input_template.md               配送先入力シートの列仕様
 docs/test_evidence_sheets_stage3.md  段階3の実シート動作確認記録
+docs/operation_decisions.md          運用方針の決定事項
 Dockerfile / fly.toml                Fly.io 用
 ```
 
