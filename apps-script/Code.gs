@@ -178,6 +178,16 @@ function createRouteFromInputSheet() {
 
   writeBackCoordinates(inputSheet, parsed, geocoded.destinations);
 
+  // 上限で打ち切った回は座標だけ残し、途中までのルートシートは作らない。
+  if (geocoded.remaining > 0) {
+    throw new Error(
+      '1回で座標にできるのは ' + GEOCODE_LIMIT_PER_RUN + '件までです。'
+      + ' 未処理の住所が ' + geocoded.remaining + '件残っているため、ルートは作っていません。'
+      + ' 取得できた座標は「' + INPUT_SHEET_NAME + '」シートに書き込んだので、'
+      + ' もう一度「配送ルート作成」を実行してください (全件の座標が揃うとルートを作ります)。'
+    );
+  }
+
   const usable = geocoded.destinations.filter(hasCoordinates);
 
   if (usable.length === 0) {
@@ -214,11 +224,6 @@ function resultMessage(sheetName, geocoded, stopCount) {
   if (geocoded.failed.length > 0) {
     lines.push('座標を取れなかった住所が ' + geocoded.failed.length + '件あります: '
       + geocoded.failed.slice(0, 3).join(' / '));
-  }
-
-  if (geocoded.remaining > 0) {
-    lines.push('未処理の住所が ' + geocoded.remaining
-      + '件残っています。もう一度実行してください。');
   }
 
   return lines.join('\n');

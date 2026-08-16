@@ -60,9 +60,12 @@ const sandbox = {
     fetch: (url) => {
       fetchCount++;
       const address = decodeURIComponent(url.match(/address=([^&]+)/)[1]);
+      const bulk = address.match(/^東京都サンプル区(\d+)$/);
       const point = address === '東京都千代田区丸の内1-9-1'
         ? { lat: 35.6812, lng: 139.7671 }
-        : GEO[address];
+        : bulk
+          ? { lat: 35.6 + Number(bulk[1]) / 1000, lng: 139.7 + Number(bulk[1]) / 1000 }
+          : GEO[address];
       const body = point
         ? { status: 'OK', results: [{ geometry: { location: point } }] }
         : { status: 'ZERO_RESULTS', results: [] };
@@ -195,6 +198,34 @@ run('createRouteFromInputSheet: 配送日タブに出力し、2回目は連番�
   sandbox.createRouteFromInputSheet();
   assert.strictEqual(sheets[2].getName(), '2026-08-15_配送ルート_2');
   assert.strictEqual(fetchCount, 2);  // 起点 + 失敗住所の再試行のみ
+});
+
+run('createRouteFromInputSheet: 上限超えは座標だけ書き戻し、ルートは作らない', () => {
+  const rows = [['配送日', '2026-08-15'], ['id', 'name', 'address', 'priority']];
+  for (let i = 1; i <= 90; i++) {
+    rows.push(['', '', '東京都サンプル区' + i, '5']);
+  }
+  const input = makeSheet('配送先入力', rows);
+  const sheets = [input];
+  spreadsheet = {
+    getSheetByName: (n) => sheets.find(s => s.getName() === n) || null,
+    getSheets: () => sheets,
+    insertSheet: (n) => { const s = makeSheet(n, []); sheets.push(s); return s; },
+    setActiveSheet: () => {},
+    toast: (msg) => { sheetValues.toast = msg; },
+  };
+
+  assert.throws(() => sandbox.createRouteFromInputSheet(), /未処理の住所が 10件/);
+  assert.strictEqual(sheets.length, 1);  // ルートシートは作られない
+  assert.strictEqual(input.data[2][4], 35.601);  // 座標は書き戻されている
+  assert.ok(!input.data[91][4]);                 // 上限を超えた行はまだ空
+
+  // 残り10件を取り終えた2回目はルートができる
+  fetchCount = 0;
+  sandbox.createRouteFromInputSheet();
+  assert.strictEqual(fetchCount, 11);  // 残り10件 + 起点
+  assert.strictEqual(sheets[1].getName(), '2026-08-15_配送ルート');
+  assert.strictEqual(sheets[1].data.length, 98);  // メタ6 + 空行 + ヘッダー + 明細90
 });
 
 run('createRouteFromInputSheet: 配送日が無いと分かるエラー', () => {

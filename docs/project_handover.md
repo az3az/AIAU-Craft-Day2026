@@ -44,7 +44,6 @@ Supabase を使わずローカルCSVと Sheets だけで動かすことも可能
 | Supabase REST クライアント（certifi によるTLS） | `src/supabase_client.py` | #1, #3 |
 | Apps Script: 段階1のシート内ルート作成 | `apps-script/Code.gs` `optimizeRoute` | #1 |
 | Apps Script: 段階2のSupabase読み取り（anonキーのみ） | `apps-script/Code.gs` `importRouteFromSupabase` | #1 |
-| Apps Script: 段階3の Sheets 完結版（住所の座標化と日付タブ出力） | `apps-script/Code.gs` `createRouteFromInputSheet` | #12（レビュー待ち） |
 | ルート結果シート上部のメタ情報表示（`latest_route_summary`） | `apps-script/Code.gs`, `supabase/schema.sql` | #7 |
 | ルート結果シートの表示書式（行高・折り返し・列幅・背景色・ヘッダー固定） | `apps-script/Code.gs` | #8 |
 | Fly.io での単発バッチ実行 | `Dockerfile`, `fly.toml` | #3 |
@@ -70,8 +69,9 @@ Supabase を使わずローカルCSVと Sheets だけで動かすことも可能
 | --- | --- | --- |
 | #4 | Excel抽出の初版 | クローズ。#10 で作り直したため不要。ブランチ削除済み |
 | #6 | Excel抽出の再作成版 | クローズ。#10 で作り直したため不要。ブランチ削除済み |
+| #12 | Apps Script 段階3の Sheets 完結版（`createRouteFromInputSheet`、住所の座標化と日付タブ出力） | オープン。レビュー待ちで未マージ。7章はこのPRの内容 |
 
-現在オープンな機能PRはありません（この引き継ぎドキュメントのPRを除く）。
+機能の未マージPRは #12 だけです。
 
 ## 3. ファイル構成
 
@@ -264,7 +264,7 @@ fly machine run <イメージ> --command "python3 src/save_route_to_supabase.py 
   本番・デモでは Google Geocoding API を使ってください。
 - ルート計算は Haversine の直線距離ベースで、道路距離や渋滞は考慮していません。
 
-## 7. Google Sheets 完結版（段階3）
+## 7. Google Sheets 完結版（段階3。PR #12 でレビュー中、main には未マージ）
 
 **目的**: ローカルPCやSupabaseを使わなくても、Google Workspace の中だけで配送順を作れる形にする。
 
@@ -274,7 +274,8 @@ fly machine run <イメージ> --command "python3 src/save_route_to_supabase.py 
 - `配送先入力` シートの `id,name,address,priority`（日本語見出しも可）を読む。`id` / `name` が空でも動く。
 - 配送日は見出し行より上の `配送日` セルか `delivery_date` 列から取る。
 - `UrlFetchApp` で Google Geocoding API を呼び、座標を `配送先入力` シートの `lat` / `lng` に書き戻す
-  （同じ住所は再取得しない。1回の実行は80件までで、残件は実行後の通知に出す）。
+  （同じ住所は再取得しない）。1回の実行は80件までで、超えた回は座標の書き戻しだけ行い、
+  ルートタブは作らずに再実行を促すエラーにする（全件の座標が揃った回にルートを作る）。
 - 起点はスクリプトプロパティ（`ROUTE_ORIGIN_ADDRESS` または `ROUTE_ORIGIN_LAT`/`ROUTE_ORIGIN_LNG`、`ROUTE_ORIGIN_NAME`）。
 - APIキーは `GOOGLE_MAPS_API_KEY` をスクリプトプロパティに置く。コード・シート・リポジトリには書かない。
 - 出力は `YYYY-MM-DD_配送ルート` タブ。同名があれば上書きせず `_2` から連番。形式は段階2と同じ。
